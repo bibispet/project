@@ -9,6 +9,24 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: lore_password
+          POSTGRES_USER: lore_user
+          POSTGRES_DB: lore_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lore_user -d lore_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://lore_user:lore_password@localhost:5432/lore_db
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +48,20 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Install postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -U lore_user -d lore_db && exit 0
+            sleep 1
+          done
+          echo "Postgres not ready" && exit 1
+
+      - name: Apply migration
+        run: psql -v ON_ERROR_STOP=1 -f schema/migrations/000_init.sql "$DATABASE_URL"
+
       - name: Test
         run: pnpm test
 
@@ -38,4 +70,3 @@ jobs:
 
       - name: Gates
         run: pnpm gates
-
