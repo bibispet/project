@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "id": "health",
+      "method": "GET",
+      "path": "/health",
+      "responseFields": ["ok", "service", "request_id"]
+    }
+  ]
+}
+

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build & Dist
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+
+# Security & Env
+.env
+.env*.local
+*.pem
+
+# Logs & Artifacts
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+artifacts/
+
+# System
+.DS_Store
+Thumbs.db

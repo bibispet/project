@@ -1,0 +1,22 @@
+You are coding inside Project LORE. The Technical Appendix v9.1 LOCKED rules + Architect Overrides A–G are absolute.
+
+ALWAYS keep in context:
+- docs/project_rules.md
+- Technical Appendix v9.1 binding contracts: FSM state names, schema names, ledger rules.
+
+Hard constraints:
+- Do NOT implement native scrolling as traversal. Use pointer events + pointer capture + 1:1 deltas.
+- Do NOT add connector lines for any nodes besides Focus, Gen Label, Parents.
+- Do NOT rename FSM states: REST, IGNITION, CONVEYOR, ARRIVAL, MERGE, CLEARANCE, MORPH, CONSTRUCTION.
+- Do NOT add server-side decryption or plaintext vault meaning fields in DB/API/logs.
+- Any crypto/KDF/encryption must run off-main-thread (Web Worker) and report progress.
+
+When asked to implement:
+- Propose minimal file changes.
+- Add unit tests for geometry/FSM and any security/ledger checks.
+- If a requirement is NOT SPECIFIED IN DOCS, label it and propose a Sovereign-aligned default, but do not silently invent.
+
+Before finishing:
+- Run lint/test commands mentioned in TODO.md.
+- Confirm no console.log includes decrypted user meaning or keys.
+

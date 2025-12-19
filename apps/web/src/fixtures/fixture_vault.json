@@ -1,0 +1,15 @@
+{
+  "summaries": [
+    {
+      "id": "fx_001",
+      "timeline_sort_key": "aB3_dEfG",
+      "label": "Fixture Node A"
+    },
+    {
+      "id": "fx_002",
+      "timeline_sort_key": "hI7_JkLm",
+      "label": "Fixture Node B"
+    }
+  ]
+}
+

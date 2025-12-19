@@ -1,0 +1,28 @@
+{
+  "name": "project-lore",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n web,api -c auto \"pnpm --filter @lore/web dev\" \"pnpm --filter @lore/api dev\"",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "build": "pnpm --filter @lore/web build && pnpm --filter @lore/api build",
+
+    "ledger:check": "node scripts/ledger-check.mjs",
+    "payload:lint": "node scripts/payload-lint.mjs",
+    "timelineSortKey:lint": "node scripts/timelineSortKey-lint.mjs",
+    "prod:no-fixtures": "node scripts/prod-no-fixtures.mjs",
+    "prod:smoke-devtools": "node scripts/prod-smoke-devtools.mjs",
+    "fixtures:pii-scan": "node scripts/fixtures-pii-scan.mjs",
+    "guardrails:known-bad": "node scripts/guardrails-known-bad.mjs",
+
+    "gates": "pnpm ledger:check && pnpm payload:lint && pnpm timelineSortKey:lint && pnpm fixtures:pii-scan && pnpm prod:no-fixtures && pnpm prod:smoke-devtools && pnpm guardrails:known-bad"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
