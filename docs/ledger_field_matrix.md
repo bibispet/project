@@ -196,3 +196,4 @@ All ops metadata tables store operational/security data with zero-knowledge cons
 - Raw IPs and User-Agents are ephemeral (edge logs only); long-term storage uses HMAC fingerprints only
 - `endpoint_key` stores route templates only (e.g., `/profiles/:id/blob`), never full URLs with IDs
 - Tables MUST NOT store profile names, emails, request payloads, vault content, or any decrypted metadata
+- ops_network_rules.ip_cidr is operator-configured policy input (CIDR). It must never store observed client IP telemetry (telemetry remains ip_hmac only).

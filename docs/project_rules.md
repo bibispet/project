@@ -36,7 +36,16 @@ You MUST classify against Appendix §2.1–§2.3.
 - If server can avoid knowing it, it must be ciphertext.
 - Never store profile meaning fields (name/DOB/bio/etc) server-side plaintext.
 - Never transmit raw media bytes or vault keys unencrypted.
-- Logs + ops tables must not store profile names, emails, request payloads, raw IPs, or URLs containing IDs. Use endpoint_key (route template) + request_id; store ip_hmac/user_agent_hmac only.
+- Logs + ops tables must not store profile names, emails, request payloads, raw observed client IPs, or URLs containing IDs.
+  Use endpoint_key (route template) + request_id; store ip_hmac/user_agent_hmac only.
+
+- **Policy vs Telemetry Clarification (Binding):**
+  - **Observed client IPs** (telemetry/logging) must never be stored raw in DB tables; store only `*_ip_hmac`.
+  - **Exception (policy input, not telemetry):** `ops_network_rules.ip_cidr` is **operator-supplied policy input** (admin-configured CIDR rule), and is the only allowed raw IP range field.
+  - `ops_network_rules.ip_cidr` MUST NOT be populated from observed client IPs; observed IPs remain HMAC-only.
+
+
+
 
 ## 4) Pointer Safety (Binding)
 - Acquire pointer capture on drag start; release on end/cancel.
