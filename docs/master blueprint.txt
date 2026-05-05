@@ -1,0 +1,2556 @@
+## 0) Toolchain & Workflow Guide
+
+### Tool Map (what each tool is best for in **this** project)
+
+* **GPT‑5.2 Pro**
+
+  * Spec extraction → turn Appendix LOCKED text into *compact, enforceable* engineering checklists.
+  * Ledger audits (field-by-field + payload-by-payload) against Appendix §2.1–§2.3. 
+  * Architecture “diff checks” (spot where implementation drifts from binding names/contracts).
+* **Gemini 3 Pro**
+
+  * Fast second-opinion code review (esp. React perf + TS typing + bundle size).
+  * “Explain what changed” diffs for PR reviews (keep humans efficient).
+* **Grok 4 / Grok 4.1 Thinking Beta**
+
+  * Debugging gnarly tactile issues: drift, jitter, RAF scheduling, pointercancel edge cases.
+  * Performance profiling interpretation: why frames drop, where layout thrash happens.
+* **Cursor**
+
+  * Primary implementation engine (web + API + SQL migrations + tests).
+  * Best for multi-file refactors while keeping `project_rules.md` + `.cursorrules` pinned.
+* **v0.dev**
+
+  * Rapid scaffolding of *non-physics* UI shells (modals, pill UI, forms), then hand-edit to comply with LOCKED interactions and Ledger rules.
+
+### Workflow Patterns (2–3 end-to-end loops)
+
+1. **LOCKED slice → Implement → Gate**
+
+   * Extract 1 Appendix slice (e.g., §3.1 + §3.9).
+   * Implement minimal feature.
+   * Run *the gate that matches the slice* (pointer safety test, tactile script, etc.).
+   * Only then move on. (Avoid multi-slice coding sessions.)
+
+2. **Tactile Micro‑Tune Loop**
+
+   * Make one small change to physics/animation constants (or one algorithm).
+   * Run the “vibe script” on iOS Safari + Android Chrome + desktop.
+   * If better: bump `PHYSICS_SPEC_VERSION` and commit. If not: revert. 
+
+3. **Ledger Gate Loop**
+
+   * Every time you add a DB column / API field / cache / log line:
+
+     * classify it (plaintext allowed vs ciphertext required) using §2.3 and §2.1–§2.2. 
+     * run packet-sniff verification for flows that touch network (upload, auth). 
+
+### Failure Loop Protocol (CRITICAL)
+
+**When a Quality Gate fails:**
+
+1. **Diagnose Checklist**
+
+   * Did we violate a LOCKED rule (scroll physics, >2 generations, state names)? 
+   * Did we break Ledger (plaintext meaning/PII in server/payload/log)? 
+   * Did we introduce a perf regression (layout thrash, main-thread crypto, React re-render storms)?
+
+2. **Smallest Fix First**
+
+   * Patch the minimal function / constant.
+   * Avoid refactors until the gate passes.
+
+3. **Retest Quickly**
+
+   * Re-run only the failing gate (unit test / Playwright / manual script).
+   * If it passes, then run the “adjacent” gate (e.g., after pointer fix, run FSM drag script).
+
+4. **When to Rollback**
+
+   * If **tactile gate fails twice in a row** after attempted minimal fixes: revert to last passing commit and escalate (see routing).
+   * If **ledger gate fails once**: **STOP THE LINE** until fixed (no further features). 
+
+5. **Escalation Routing**
+
+   * **Physics/tactile**: escalate to Grok 4.1 Thinking Beta with minimal repro + video + constants file.
+   * **Build/test**: escalate to Gemini for CI / TS / bundler diagnosis.
+   * **Ledger/security**: escalate to GPT‑5.2 Pro for field-by-field redesign + packet-sniff plan.
+   * **Schema drift**: escalate to GPT‑5.2 Pro + DB migration owner; enforce Appendix §7.1 names. 
+
+### Prompt Engineering Starter Pack (10–14 reusable prompts)
+
+Copy/paste prompts (swap file paths / snippets):
+
+1. **LOCKED extraction**
+
+   * “Extract the binding requirements from Appendix §X.Y (LOCKED). Output: a checklist of MUST/MUST NOT with exact names and failure examples.”
+
+2. **Ledger field classification**
+
+   * “Given this DB table/column or API payload, classify each field per Appendix §2.3. If not explicitly allowed plaintext, treat as ciphertext unless operationally unavoidable. Propose safe redesign.” 
+
+3. **Cursor implementation prompt (physics)**
+
+   * “Implement Universal Drag per Appendix §3.1 and pointer safety per §3.9. Target files: `apps/web/src/physics/*`, `apps/web/src/components/Surface.tsx`. Constraints: no native scroll, touch-action none, pointer capture, 1:1 deltas, pointercancel snapback to REST, multitouch ignore non-primary.”  
+
+4. **Bezier Y geometry (override)**
+
+   * “Implement Architect Override A+B: curved Bezier Y with explicit anchors and control points. Only Focus/GenLabel/Parents get lines (Override C). Provide unit tests for anchor outputs.”
+
+5. **FSM correctness check**
+
+   * “Audit this FSM code: verify exact state names match Appendix §3.6 (REST/IGNITION/CONVEYOR/ARRIVAL/MERGE/CLEARANCE/MORPH/CONSTRUCTION). Flag renames or missing transitions.” 
+
+6. **React perf review**
+
+   * “Review this component tree for pointer-move performance. Identify any state updates causing rerenders per frame. Propose minimal patch using RAF + refs.”
+
+7. **Lens toggle unplug/replug**
+
+   * “Implement lens toggle animation sequence exactly per Appendix §3.5: retract line → fade old node → draw new connector → fade new node after line reaches target. No crossfade.” 
+
+8. **Implosion suction animation**
+
+   * “Design an implosion animation that ‘packs’ UI elements into Focus bubble (no dissolve). Must feel mass-conserving. Provide transform + timing recipe and layering order.”
+
+9. **Non-blocking crypto**
+
+   * “Design a Web Worker crypto pipeline for Argon2id/PBKDF2 + AES‑256‑GCM + sealed box envelopes. Must not stutter UI thread. Provide message protocol + progress callbacks.” 
+
+10. **Packet-sniff verification**
+
+* “Create a packet-sniff test plan to prove no plaintext content or keys leave device during upload + registration. Include what to inspect and expected redacted payloads.” 
+
+11. **Schema drift detection**
+
+* “Compare current migrations to Appendix §7.1 binding columns/enums. List mismatches and generate a minimal corrective migration.” 
+
+12. **Ops metadata compliance**
+
+* “Audit ops logs/events for Appendix §7.3: no raw IP long-term, HMAC storage only, no profile names/emails/payloads/URLs with IDs. Suggest fixes.” 
+
+### Repo Context Artifacts (MANDATORY OUTPUTS)
+
+You will create these *as files* in the repo. (Content below is copy/paste ready.)
+
+#### `docs/project_rules.md`
+
+```md
+# Project LORE — Project Rules (Production Binding)
+
+This repo implements Project LORE per "Technical Appendix v9.1" (Production Binding) + Architect Overrides A–G.
+
+## 0) Change Control
+- Any Appendix section marked **LOCKED** may NOT be modified in implementation intent without Architect + Product approval.
+- If unsure whether something is LOCKED, treat it as LOCKED until confirmed.
+
+## 1) Absolute Non-Negotiables (LOCKED)
+- No native scroll physics as source of truth for traversal.
+- Main surface must use touch-action:none, Pointer Events + pointer capture, 1:1 pointer deltas.
+- Renderer must be custom DOM rail + SVG connector layer. No infinite-canvas graph libraries.
+- Render window: exactly 2 generations (Focus + Parents). Never render deeper generations simultaneously.
+- Server must never decrypt user vault content.
+
+## 2) Binding Names / Contracts (DO NOT RENAME)
+- FSM state names: REST, IGNITION, CONVEYOR, ARRIVAL, MERGE, CLEARANCE, MORPH, CONSTRUCTION.
+- Postgres schema column names and enums per Appendix §7.x (binding).
+- Physics constants file: physics/constants.ts; bump PHYSICS_SPEC_VERSION on any constant change.
+
+## 3) Ledger Gate (Security Veto)
+For every:
+- DB field
+- API payload
+- auth/session field
+- log line
+- analytics event
+- client cache/persistence
+You MUST classify against Appendix §2.1–§2.3.
+- If server can avoid knowing it, it must be ciphertext.
+- Never store profile meaning fields (name/DOB/bio/etc) server-side plaintext.
+- Never transmit raw media bytes or vault keys unencrypted.
+
+## 4) Pointer Safety (Binding)
+- Acquire pointer capture on drag start; release on end/cancel.
+- On pointercancel: immediately safe snapback animation and return to REST.
+- Multitouch: only first pointer authoritative; ignore others until release.
+
+## 5) Connector / Line Rules (Architect Override C)
+- ONLY these nodes participate in connector lines:
+  - Focus bubble
+  - Generation Label bubble
+  - Parent bubbles
+- Everything else has NO timeline connector lines (memories, drawers, sibling expansion, etc).
+
+## 6) Curved "Bezier Y" Geometry + Anchors (Architect Override A + B)
+- Y must be smooth curved bezier "Y" (organic, vein-like; not angular).
+- Branch origin: TOP-CENTER of Generation Label bubble.
+- Maternal branch curves up/out LEFT, lands on INNER SIDE of LEFT parent bubble (side closest to center).
+- Paternal branch curves up/out RIGHT, lands on INNER SIDE of RIGHT parent bubble.
+- Line must land on SIDE of each parent bubble (not top/bottom).
+- Define explicit SVG anchor points for Focus, Generation Label, Parents.
+- Anchors must update during FSM travel sequences and lens toggles.
+
+## 7) Implosion Visual (Architect Override D)
+- When nodes hide/collapse, they must visually "suck into" or "fold behind" the Focus bubble.
+- No simple dissolve/cross-fade shortcut.
+
+## 8) Lens Toggle Fidelity (Architect Override E)
+- Lens switching must be Unplug/Replug:
+  retract old line → fade old node → fade new node → extend new line.
+- No simple cross-fade between states.
+
+## 9) Viewport Stability (Architect Override F)
+- Main tactile surface must not jitter/resize due to mobile browser UI.
+- Do not rely on naive 100vh if it causes address-bar jitter.
+- Must pass iOS Safari + Android Chrome stability gate.
+
+## 10) Non-Blocking Crypto (Architect Override G)
+- Key derivation and encryption must NOT block/stutter main UI thread.
+- Use worker/off-main-thread strategy with user-visible progress:
+  "Deriving Keys…" / "Encrypting…" / "Uploading…"
+```
+
+#### `.cursorrules`
+
+```txt
+You are coding inside Project LORE. The Technical Appendix v9.1 LOCKED rules + Architect Overrides A–G are absolute.
+
+ALWAYS keep in context:
+- docs/project_rules.md
+- Technical Appendix v9.1 binding contracts: FSM state names, schema names, ledger rules.
+
+Hard constraints:
+- Do NOT implement native scrolling as traversal. Use pointer events + pointer capture + 1:1 deltas.
+- Do NOT add connector lines for any nodes besides Focus, Gen Label, Parents.
+- Do NOT rename FSM states: REST, IGNITION, CONVEYOR, ARRIVAL, MERGE, CLEARANCE, MORPH, CONSTRUCTION.
+- Do NOT add server-side decryption or plaintext vault meaning fields in DB/API/logs.
+- Any crypto/KDF/encryption must run off-main-thread (Web Worker) and report progress.
+
+When asked to implement:
+- Propose minimal file changes.
+- Add unit tests for geometry/FSM and any security/ledger checks.
+- If a requirement is NOT SPECIFIED IN DOCS, label it and propose a Sovereign-aligned default, but do not silently invent.
+
+Before finishing:
+- Run lint/test commands mentioned in TODO.md.
+- Confirm no console.log includes decrypted user meaning or keys.
+```
+
+---
+
+## 1) Strategy
+
+### Cost-Effectiveness Strategy (minimize token waste + rework while staying compliant)
+
+* **Front-load contracts that cause rework if wrong**:
+
+  * Pointer/rail architecture (because it touches every frame). 
+  * Geometry/anchors and “only-lines-for-core-nodes” (because it shapes the renderer). 
+  * Schema/enums naming contract (because drift is expensive to unwind). 
+  * Ledger mapping + logging rules (because one violation forces redesign). 
+* **Use fixtures until UI physics is stable**:
+
+  * Don’t block tactile iteration on API/DB; instead use a `VaultRepo` interface with a fixture implementation (details below).
+* **Gates over “big bang”**:
+
+  * Each LOCKED slice gets a corresponding gate (tests + device checks). If a gate fails, fix before moving on. 
+
+### Data Strategy (CRITICAL): feed Tactile Core UI early **without** blocking on DB/API
+
+**Goal:** Build the thick-client renderer + FSM using realistic shapes **before** backend exists, without later rewrites.
+
+**Approach:** Define a stable client contract:
+
+* `VaultRepo` interface returns **UI-ready decrypted shapes** (names/DOB/etc) *in memory only*.
+* `FixtureVaultRepo` supplies deterministic demo data (plaintext in repo fixtures, never transmitted).
+* Later, `ApiVaultRepo` fetches ciphertext blobs + envelopes, decrypts client-side, returns the same UI shapes. This aligns with Thick Client doctrine. 
+
+**Key design invariant:** The UI layer never talks to “encrypted blobs” directly. The repo layer is the seam.
+
+**Transition to real schema later**
+
+* Fixture IDs match UUID format and table semantics (profiles/relationships/memories).
+* The `ApiVaultRepo` will map from Appendix §7.1 rows into the same UI shapes. 
+
+### Risk Register (top technical risks + mitigations)
+
+| Risk                                                | Why it’s high risk                                               | Mitigation                                                                     | Gate / Evidence                                                  |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| UI feels like a webpage (scroll/inertia)            | Explicitly banned; core brand promise.                           | Implement custom rail, no native scroll; perf design with RAF + refs.          | Tactile script + profiler on iOS/Android; pointer delta overlay. |
+| Address-bar viewport jitter                         | Overrides require stability; 100vh is banned if jitter.          | Use stable viewport strategy (svh/dvh + VisualViewport fallback).              | iOS Safari + Android Chrome stability gate (manual).             |
+| Pointercancel breaks determinism                    | Binding error behavior required.                                 | Centralize pointer state machine; safe snapback → REST.                        | Unit test for cancel; manual multi-touch test.                   |
+| Schema drift (enum/name mismatch)                   | §7.1 names are binding.                                          | Lock migrations early; generate TS enums from schema; CI check.                | “schema-diff” script in CI.                                      |
+| Ledger violation (plaintext meaning stored or sent) | Sovereignty rule is binding.                                     | Field classification matrix + payload lint + packet-sniff gate.                | Packet-sniff proof + unit tests + log redaction.                 |
+| Crypto blocks UI thread                             | Override G mandates no stutter.                                  | Web Worker KDF/encrypt; chunk pipeline; progress UI.                           | Perf test (frame budget) + manual “drag while encrypting” check. |
+| Connector geometry looks angular/wrong              | Override A mandates organic bezier Y and precise landing points. | Implement mathematical anchor/control point spec; unit tests; debug overlay.   | Screenshot/recorded demo + geometry tests.                       |
+| Lens toggle is a crossfade                          | Explicitly disallowed; must demonstrate bond change.             | Implement unplug/replug animation controller.                                  | Manual lens toggle check on device.                              |
+| Transfer ownership complexity                       | Production gate requires eligibility blocking + rotation.        | Implement minimal custody table + gating early; implement rotation flow later. | Integration test + manual scenario checklist.                    |
+| Self-hosting deployment breaks                      | Must run without cloud-only dependency.                          | Docker compose reference deployment + smoke tests.                             | `docker compose up` + health checks.                             |
+
+---
+
+## 1.5) UI Mechanics Coverage Map (MANDATORY)
+
+Every core contract/mechanic/invariant is mapped to:
+
+* **Implemented in Step**
+* **Tested in Step**
+* **Evidence artifact**
+
+Legend: Sxx = Step IDs in Section 2.
+
+### A) Core UI Contracts (Appendix §4)
+
+| Mechanic / Contract                                                       | Implement | Test | Evidence                                   |
+| ------------------------------------------------------------------------- | --------: | ---: | ------------------------------------------ |
+| Global nav pill: Timeline/Search/Vault + floating “+” capture button      |       S13 |  S13 | Screenshot + manual tap script             |
+| Read ↔ Edit mode toggle (top-right)                                       |       S13 |  S13 | Manual script; unit for mode gating        |
+| Info cards: tap non-centered node opens popover w/o recenter; max 2 cards |       S13 |  S13 | Cypress/Playwright UI test + manual        |
+| Sibling drawer + lens-based sibling computation                           |       S13 |  S14 | Unit tests for sibling selection; demo UI  |
+| Tactile lab feel + press/depress; implosion not fade                      |       S08 |  S08 | Video + CSS animation inspection           |
+| >2 parents overflow strategy + Other Parents list + empty slot behavior   |   S14/S13 |  S14 | Unit tests for selection; UI list present  |
+
+### B) Physics/FSM Mechanics (Appendix §3)
+
+| Mechanic / Contract                                               | Implement |        Test | Evidence                                 |   |
+| ----------------------------------------------------------------- | --------: | ----------: | ---------------------------------------- | - |
+| No native scroll; touch-action:none; pointer capture; 1:1 deltas  |       S04 |         S04 | Perf overlay + manual drag               |   |
+| Pointercancel safe snapback → REST; multitouch ignore non-primary |       S04 |         S04 | Unit tests + device multi-touch test     |   |
+| 2-generation render window (Focus + Parents only)                 |       S05 |         S05 | Renderer unit + manual visual check      |   |
+| Deterministic placement rules + slot_hint override                |       S14 |         S14 | Unit tests                               |   |
+| Connector solid/dotted truth table                                |       S06 |         S06 | Unit tests on edge cases                 |   |
+| Lens toggle unplug/replug sequence                                |       S07 |         S07 | Manual script + timing checks            |   |
+| FSM state names binding                                           |   S10–S12 |         S10 | Unit test asserts state name set         |   |
+| Sequence A Travel to Past (REST→MERGE)                            |       S10 |         S10 | Manual drag script + video               |   |
+| Sequence A2 Choose Parent horizontal rail thresholds              |       S11 |         S11 | Unit tests for overlap/velocity + haptic |   |
+| Sequence B Travel to Future (CLEARANCE→CONSTRUCTION)              |       S12 |         S12 | Manual script + video                    |   |
+| Physics constants versioning + bump requirement                   |       S09 |         S26 | Test asserts version bump on change      |   |
+| Haptics “clunk” only at rail lock + pin completion                |       S09 | S10/S11/S12 | Manual + unit event emission             |   |
+
+### C) Architect Overrides A–G (binding)
+
+| Override                          | Implement |    Test | Evidence                               |
+| --------------------------------- | --------: | ------: | -------------------------------------- |
+| A Curved Bezier Y geometry        |       S06 |     S06 | Geometry unit tests + overlay demo     |
+| B Explicit anchors + update rules |       S06 | S06/S07 | Anchor tests + lens/FSM demo           |
+| C Only core nodes get lines       |   S05/S06 |     S05 | Snapshot test ensures no other lines   |
+| D Implosion suction visual        |       S08 |     S08 | Video + manual “mass feel” script      |
+| E Lens Unplug/Replug fidelity     |       S07 |     S07 | Manual lens toggle script              |
+| F Viewport stability (no jitter)  |       S03 | S03/S26 | Device stability gate                  |
+| G Non-blocking crypto             |       S17 | S17/S26 | Perf test + “drag during encrypt” test |
+
+### D) Data/Security Invariants (Appendix §0–§2, §7–§9)
+
+| Invariant                                                  | Implement |    Test | Evidence                        |
+| ---------------------------------------------------------- | --------: | ------: | ------------------------------- |
+| Kiosk Mode ≤3 taps to add memory                           |       S19 | S19/S26 | Manual “3 taps” script          |
+| Encrypt-before-upload; ciphertext-only server              |       S19 |     S26 | Packet-sniff proof              |
+| Ledger classification enforcement                          |   S01/S15 |     S26 | Ledger audit + tests            |
+| Schema/enums exact names                                   |       S01 | S01/S26 | Migration diff script           |
+| Better Auth: device inventory + revoke-all + forced revoke |       S15 |     S26 | Manual + integration tests      |
+| 18-year custody eligible_at gate + transfer flow           |   S22/S23 |     S26 | Scenario checklist              |
+| Ops metadata: no raw IP long-term; no vault content        |       S24 |     S24 | Unit tests + log inspection     |
+| Self-hosting docker compose                                |       S25 |     S25 | `docker compose up` smoke test  |
+
+---
+
+## 2) Master Build Sequence (CORE OUTPUT)
+
+### Ordering Justifications (MANDATORY)
+
+**(a) Dumb Rail vs Smart Brain (FSM layering)**
+We implement the **dumb rail** (pointer capture, 1:1 deltas, stable viewport, perf-safe rendering) *before* full FSM choreography, because §3.1 and §3.9 are non-negotiable foundations: any FSM work built on unstable pointer/viewport will be rework.  
+
+**(b) Schema-lock timing vs other work**
+We lock the Postgres schema contract early because column/enums are binding and drift is expensive to unwind (§7.1). 
+But we *do not* block UI: the UI consumes fixture-backed `VaultRepo` first.
+
+**(c) Crypto timing vs API/UI work**
+We delay full crypto until after tactile core is stable (to avoid two moving targets), but we implement crypto **before any networked upload/auth flows** so we don’t violate “encrypt before leaving device” and the packet-sniff gate (§0.1, §1.3, §12).   
+
+---
+
+### Step S00 — Repo Bootstrap + Guardrails
+
+**Objective:** Create the monorepo skeleton, enforce rules, and wire CI hooks so LOCKED + Ledger violations are caught early.
+
+**Definition of Success (verifiable):**
+
+* Repo boots locally (`web` and `api` dev servers run).
+* `docs/project_rules.md` and `.cursorrules` exist and are referenced in README.
+* Formatting/lint/test commands run in CI (even if tests minimal).
+
+**Dependencies:** None (Day 0).
+
+**Inputs:**
+
+* Appendix change control note (LOCKED approval) 
+* Architecture split (web + guard + postgres + blob) 
+* Self-hosting docker compose components 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary Tool(s): GPT‑5.2 Pro (rule extraction review)
+* Execution Mode: Implementation + Review
+* Why: Cursor is best for multi-file scaffolding; GPT ensures rules match spec.
+
+**Prompt/Action (copy/paste):**
+
+* Cursor:
+
+  * “Create a pnpm monorepo with `apps/web` (Next.js TS) and `apps/api` (Node TS). Add `docs/project_rules.md` and `.cursorrules` exactly as provided. Add eslint/prettier, vitest, and a root `pnpm test` that runs both apps’ tests.”
+* GPT‑5.2 Pro:
+
+  * “Review repo structure for compliance with Appendix §1.2 components and §10.2 docker compose targets.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/*`
+* `/apps/api/*`
+* `/docs/project_rules.md`
+* `/.cursorrules`
+* `/.github/workflows/ci.yml`
+* `/README.md`
+
+**Data Feeding Plan:** N/A (foundational).
+
+**Quality Gate:**
+
+* `pnpm lint` and `pnpm test` pass.
+* `apps/web` can render a blank page without scrollbars.
+
+**Failure Loop (if gate fails):**
+
+* Diagnose (first 3):
+
+  1. CI node version mismatch / pnpm not installed
+  2. TypeScript config mismatch between packages
+  3. lint config not shared properly
+* Likely causes: workspace config incorrect.
+* Smallest fix: simplify workspace to 2 apps, remove shared packages until stable.
+* Retest quickly: rerun `pnpm -w lint && pnpm -w test`.
+* Rollback/escalate: rollback only if you introduced broad refactors; escalate to Gemini if CI config confusion.
+* Troubleshooting Pivot (tool + prompt):
+
+  * Gemini: “Given this CI log + package.json, identify minimal fix to make pnpm workspaces run lint/test.”
+
+---
+
+### Step S01 — Schema Lock + Ledger Field Matrix (STOP‑THE‑LINE FOUNDATION)
+
+**Objective:** Implement the Appendix §7 schema contract (binding names) and create a field-by-field Ledger classification matrix used as a build gate.
+
+**Definition of Success (verifiable):**
+
+* Postgres migrations create all §7.1 tables + enums + constraints.
+* A `docs/ledger_field_matrix.md` enumerates **every** DB column with classification.
+* CI includes a “schema contract” test that compares expected columns to live DB (docker).
+
+**Dependencies:** S00.
+
+**Inputs:**
+
+* §7.1 Core Tables (binding columns) 
+* §7.2 timeline_sort_key definition (LOCKED) 
+* §2.1–§2.3 classification ledger + sovereignty rule 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (ledger audit review)
+* Mode: Implementation + Red-team
+* Why: SQL + tests in Cursor; GPT validates no plaintext drift.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create SQL migrations implementing Appendix §7.1 tables/enums exactly. Add `docs/ledger_field_matrix.md` listing each column and whether plaintext allowed/ciphertext required per §2.3. Add a vitest integration test that spins up docker postgres and asserts columns exist with correct names/types.”
+* GPT:
+
+  * “Audit the ledger matrix: flag any field that contains human meaning in plaintext.”
+
+**Outputs/Artifacts:**
+
+* `/schema/migrations/*.sql`
+* `/schema/README.md` (how to run migrations)
+* `/docs/ledger_field_matrix.md`
+* `/apps/api/src/db/schemaContract.test.ts` (or similar)
+
+**Data Feeding Plan:** N/A (schema).
+
+**Quality Gate (STOP THE LINE if fails):**
+
+* `schemaContract.test.ts` passes (exact columns).
+* Ledger matrix exists and includes all tables.
+* No plaintext meaning fields exist in migrations (names/DOB/title/etc). 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Column name mismatch with Appendix
+  2. Enum values mismatch
+  3. Missing constraints (cross-family edge prevention)
+* Likely causes: manual typo in SQL.
+* Smallest fix: edit migration; add corrective migration if already applied.
+* Retest: run migration in docker + rerun schema test.
+* Rollback: if multiple migrations drift, reset local DB and squash to a single clean baseline.
+* Pivot:
+
+  * GPT prompt: “Compare this SQL migration vs Appendix §7.1 snippet and list exact mismatches.”
+
+---
+
+### Step S02 — Local Dev Stack: Postgres + MinIO + Compose Skeleton
+
+**Objective:** Bring up the self-hosting dev stack so later steps can integrate upload/download flows.
+
+**Definition of Success (verifiable):**
+
+* `docker compose up` starts postgres + minio.
+* MinIO bucket exists for ciphertext blobs.
+* Health endpoints exist for both services.
+
+**Dependencies:** S01.
+
+**Inputs:**
+
+* Self-hosting components list §10.2 (docker compose reference) 
+* Blob storage is ciphertext-only + minimal metadata 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4 (debug docker networking)
+* Mode: Implementation + QA
+* Why: Compose wiring + env.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Add docker-compose.yml with services: postgres, minio. Include init scripts to create bucket `lore-blobs`. Add `make dev-up` and `make dev-down`.”
+
+**Outputs/Artifacts:**
+
+* `/docker-compose.yml`
+* `/Makefile` (or scripts)
+* `/ops/minio-init/*` (bucket creation)
+
+**Data Feeding Plan:** N/A.
+
+**Quality Gate:**
+
+* `docker compose up` succeeds.
+* MinIO bucket exists; can `PUT`/`GET` a test object (ciphertext placeholder only).
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. ports already in use
+  2. minio init script not running
+  3. postgres volume permissions
+* Smallest fix: change ports; add retry loop to init; reset volumes.
+* Retest: re-run compose.
+* Pivot:
+
+  * Grok prompt: “Diagnose docker compose startup failure. Here are logs; propose minimal fix.”
+
+---
+
+### Step S03 — Viewport Stability Harness (Override F)
+
+**Objective:** Create a stable interaction surface height that does not jitter with mobile browser UI.
+
+**Definition of Success (verifiable):**
+
+* Main “Surface” height is stable during address bar show/hide.
+* No layout jumps while dragging.
+
+**Dependencies:** S00 (web app exists).
+
+**Inputs:**
+
+* Override F (viewport stability; ban naive 100vh if it jitters)
+* Appendix §3.1: surface uses touch-action none, no native scroll 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4 (mobile viewport quirks)
+* Mode: Implementation + Manual QA
+* Why: requires code + device testing.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `useStableViewport()` hook. Use CSS `100dvh` when supported; fallback to JS `visualViewport.height` writing CSS var `--app-vh` and set surface height to `calc(var(--app-vh) * 1px)`. Prevent body scrolling.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/hooks/useStableViewport.ts`
+* `/apps/web/src/components/Surface.tsx`
+* `/apps/web/src/styles/globals.css`
+
+**Data Feeding Plan:** N/A (surface only).
+
+**Quality Gate (tactile):**
+
+* Objective checks:
+
+  * Address bar expand/retract does not change surface scale/position by >1px while idle.
+  * During drag, delta overlay remains stable (no jump).
+* Manual vibe script:
+
+  1. iOS Safari: open app, scroll page (should be impossible), drag up/down; toggle address bar; confirm no reflow.
+  2. Android Chrome: same.
+* Device coverage: iOS Safari + Android Chrome + desktop. (Also aligns with §12 gate expectations.) 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are we still using 100vh anywhere?
+  2. Is `visualViewport` listener throttled/debounced incorrectly?
+  3. Is `position: fixed` causing bounce?
+* Smallest fix: ensure surface height uses CSS var only; disable scroll on html/body.
+* Retest: repeat device script.
+* Rollback: if new approach causes worse jitter, revert to previous stable method.
+* Pivot:
+
+  * Grok prompt: “iOS Safari viewport jitter: here’s Surface.tsx + CSS; propose minimal fix using visualViewport.”
+
+---
+
+### Step S04 — Universal Drag Rail + Pointer Safety (LOCKED §3.1 + §3.9)
+
+**Objective:** Implement the “Custom DOM Rail” (1:1 drag) with pointer capture, pointercancel safety, and multitouch discipline.
+
+**Definition of Success (verifiable):**
+
+* Drag is 1:1 (pixel-locked) and never triggers native scroll.
+* On pointercancel, system snapbacks and returns to REST.
+* Multitouch: only first pointer moves the surface.
+
+**Dependencies:** S03.
+
+**Inputs:**
+
+* §3.1 No Native Scroll Physics (LOCKED) 
+* §3.9 Pointer Safety rules 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (debug drift/jank)
+* Mode: Implementation + Test
+* Why: performance-critical code.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `RailController` that listens to pointerdown/move/up on Surface; uses pointer capture; tracks authoritative pointerId; updates positions via requestAnimationFrame without React rerender per frame. Add pointercancel handler: safe snapback animation + return to REST.”
+  * “Add debug overlay showing: pointer delta, rail delta, FPS.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/physics/rail/RailController.ts`
+* `/apps/web/src/physics/rail/railTypes.ts`
+* `/apps/web/src/components/SurfaceDebugOverlay.tsx`
+* Unit tests: `/apps/web/src/physics/rail/rail.test.ts`
+
+**Data Feeding Plan:** Fixture-free (rail only).
+
+**Quality Gate (tactile):**
+
+* Objective checks:
+
+  * During drag, rail delta equals pointer delta within ±1px.
+  * No scrollbars, no page scroll.
+  * pointercancel triggers snapback within 250ms and state resets.
+* Manual vibe script:
+
+  1. Drag up/down quickly; ensure no inertia.
+  2. Two-finger touch: second finger does nothing.
+  3. Trigger pointercancel (devtools sim or OS gesture) → returns to REST.
+* Device coverage: iOS Safari + Android Chrome.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Is any state update happening in React per pointermove?
+  2. Did we forget `touch-action:none` on surface?
+  3. Is pointer capture acquired correctly?
+* Smallest fix: move per-frame updates into refs + RAF; set CSS properly.
+* Retest: use overlay; repeat manual script.
+* Escalate if fails twice: physics owner must redesign update loop.
+* Pivot:
+
+  * Grok prompt: “Why does rail drift from pointer deltas? Here’s RailController code; propose minimal patch.”
+
+---
+
+### Step S05 — Scene Graph: Focus + Parents + Gen Label Only (LOCKED §3.2) + Override C
+
+**Objective:** Render the constrained topology (Focus + Parents + Gen Label) with a strict rule that **only these nodes can ever have connector lines**.
+
+**Definition of Success (verifiable):**
+
+* Renderer never instantiates more than 2 parent nodes + focus at once.
+* Attempting to render connector lines for other nodes is prevented by type system/runtime assertions.
+
+**Dependencies:** S04.
+
+**Inputs:**
+
+* §3.2 Restricted DAG topology + 2-generation render window (LOCKED) 
+* Terminology for Focus/Gen Label/Parents 
+* Override C (“Only these things get lines”)
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (contract review)
+* Mode: Implementation + Review
+* Why: define foundational types to prevent later violations.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create `SceneModel` types: FocusNode, ParentNode (left/right), GenLabelNode. Enforce `ConnectorEligibleNode` union = Focus|GenLabel|Parent only. Any connector API accepts only that type.”
+  * “Render these nodes in `TimelineSurface` with placeholder fixture data.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/scene/types.ts`
+* `/apps/web/src/scene/TimelineSurface.tsx`
+* `/apps/web/src/fixtures/scene_fixture.ts` (demo)
+* Unit test: `/apps/web/src/scene/onlyLinesRule.test.ts`
+
+**Data Feeding Plan:**
+
+* Source: fixtures (`scene_fixture.ts`)
+* Sample shape:
+
+  * `{ focus: {id, displayName}, genLabel: {...}, parents: {left?:..., right?:...} }`
+* Migration path:
+
+  * Replace fixture with `VaultRepo.getFocusSlice()` result in S14; UI shape remains stable.
+
+**Quality Gate:**
+
+* Snapshot test proves only Focus/GenLabel/Parents have connectors.
+* Manual check: no extra nodes appear.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Did someone render “memory nodes” as connector nodes?
+  2. Did a type escape allow arbitrary nodes into connector renderer?
+  3. Is parent count >2?
+* Smallest fix: tighten TS unions + runtime asserts.
+* Retest: run unit tests.
+* Pivot:
+
+  * GPT prompt: “Audit these TS types to ensure ‘only core nodes get lines’ cannot be violated.”
+
+---
+
+### Step S06 — Curved “Bezier Y” Geometry + Anchors (Overrides A+B) + Connector Truth Table (LOCKED §3.4)
+
+**Objective:** Implement the connector layer:
+
+* Curved Bezier Y geometry spec (MANDATED)
+* Explicit anchors for Focus/GenLabel/Parents
+* Solid vs dotted per truth table
+
+**Definition of Success (verifiable):**
+
+* Bezier Y branches originate at **top-center of Gen Label bubble** and land on **inner side** of parent bubbles.
+* Connectors are solid iff (`biological` AND `verified`), else dotted.
+* Geometry updates smoothly during drag/FSM without DOM measurement jitter.
+
+**Dependencies:** S05.
+
+**Inputs:**
+
+* Override A (curved Bezier Y) + Override B (anchors)
+* §3.4 connector styles truth table (LOCKED) 
+* Only 2 generations + placement topology context 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (visual tuning)
+* Mode: Implementation + Test
+* Why: geometry is precise; needs tests + tuning.
+
+#### Binding Geometry Spec (implementable, no guesswork)
+
+**Coordinate space**
+
+* Use **surface-local coordinates** in CSS pixels:
+
+  * origin (0,0) at surface top-left
+  * x increases right; y increases down
+* Nodes store center positions `{cx, cy}` in this space.
+* Bubble sizes are constants (or derived from scale), so anchors are computed mathematically (no `getBoundingClientRect` during drag).
+
+**Anchor points (explicit)**
+
+* Focus bubble:
+
+  * `focusStemAnchor = (focus.cx, focus.cy - focus.radius)` (top-center boundary)
+* Generation Label bubble:
+
+  * `labelBranchAnchor = (label.cx, label.cy - label.radius)` (**top-center** boundary) — **Override A origin**
+  * `labelStemAnchor   = (label.cx, label.cy + label.radius)` (bottom-center boundary)
+* Left parent bubble:
+
+  * `leftParentInnerAnchor = (left.cx + left.radius, left.cy)` (right-middle boundary)
+* Right parent bubble:
+
+  * `rightParentInnerAnchor = (right.cx - right.radius, right.cy)` (left-middle boundary)
+
+**Bezier control point strategy**
+
+* For each branch (cubic bezier):
+
+  * start `S = labelBranchAnchor`
+  * end `E = parentInnerAnchor`
+  * `dx = E.x - S.x`, `dy = E.y - S.y` (dy is negative in REST)
+  * control point 1 (vertical “vein rise”):
+
+    * `C1 = (S.x, S.y + dy * 0.55)`  (moves upward because dy < 0)
+  * control point 2 (horizontal “side entry” tangent):
+
+    * `C2 = (E.x - dx * 0.45, E.y)` (forces horizontal tangent at end)
+  * Path: `M S.x S.y C C1.x C1.y, C2.x C2.y, E.x E.y`
+
+* Stem (cubic bezier) from focus to label:
+
+  * start `Sf = focusStemAnchor`
+  * end `El = labelStemAnchor`
+  * `dy = El.y - Sf.y` (dy is negative in REST because label above focus)
+  * `C1 = (Sf.x, Sf.y + dy * 0.35)`
+  * `C2 = (El.x, El.y - dy * 0.35)`
+  * Path: `M Sf ... C ... El ...`
+
+**Responsiveness rules**
+
+* Bubble radii scale with viewport min dimension:
+
+  * `radius = clamp(28, min(vw,vh)*0.06, 48)` (example; keep as constant in code with tests)
+* Parent separation scales similarly.
+* On resize (stable viewport update), recompute base node positions and therefore anchors.
+* During drag/FSM:
+
+  * node centers are updated by rail/FSM; anchors derived from centers; connectors recomputed every RAF tick.
+
+**Updates during lens toggles**
+
+* Lens toggle sequence (S07) will:
+
+  * animate the branch path length from 100% → 0% (retract to labelBranchAnchor)
+  * swap endpoint node data
+  * animate 0% → 100% to new endpoint
+
+**Updates during FSM travel sequences**
+
+* As Focus/Label/Parents move, anchors update automatically from their centers.
+* No DOM reads during movement.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `connectorGeometry.ts` exporting `computeAnchors(scene)` and `computePaths(scene, lensMode)`. Render SVG paths in `ConnectorLayer.tsx`. Apply solid/dotted class using truth table. Add unit tests asserting anchor math + path endpoints match spec.”
+  * “Add debug mode that draws anchor dots.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/scene/connector/connectorGeometry.ts`
+* `/apps/web/src/scene/connector/ConnectorLayer.tsx`
+* `/apps/web/src/scene/connector/connectorGeometry.test.ts`
+* `/apps/web/src/styles/connectors.css`
+
+**Data Feeding Plan:**
+
+* Source: fixture scene positions from S05
+* Required shape: `SceneModel` with `focus/label/parents` positions + radii + relationship meta.
+* Migration path: positions become outputs of FSM engine (S10–S12); relationship meta comes from VaultRepo (S14).
+
+**Quality Gate (tactile + correctness):**
+
+* Objective checks:
+
+  * Branches land on parent inner sides (exact anchor points).
+  * Branch origin exactly equals label top-center anchor.
+  * Solid/dotted matches truth table.
+* Manual vibe script:
+
+  1. Toggle debug anchors on; visually confirm landing points.
+  2. Drag slightly: connectors follow without jitter.
+* Device coverage: desktop + one mobile.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are we mixing coordinate spaces (viewport vs surface)?
+  2. Are radii mismatched vs CSS size?
+  3. Are we reading layout each frame?
+* Smallest fix: derive anchors from model only; align CSS bubble size to radius.
+* Retest: run geometry tests + debug overlay.
+* Pivot:
+
+  * Grok prompt: “Bezier Y looks angular/wrong. Here are anchor/control point formulas; propose minimal tuning without changing override rules.”
+
+---
+
+### Step S07 — Lens Toggle “Unplug/Replug” (LOCKED §3.5 + Override E)
+
+**Objective:** Implement lens switching that physically demonstrates bond change:
+
+* retract old connector
+* fade old node
+* draw new connector
+* fade new node after line reaches target
+
+**Definition of Success (verifiable):**
+
+* No crossfade.
+* Sequence matches Appendix §3.5 exactly.
+
+**Dependencies:** S06.
+
+**Inputs:**
+
+* §3.5 Lens Toggle Behavior (LOCKED) 
+* Override E (no crossfade; unplug/replug)
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (sequence audit)
+* Mode: Implementation + QA
+* Why: choreography correctness > aesthetics.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create `LensToggleController` that drives connector path stroke-dashoffset for retract/extend, and node opacity transitions. Ensure fade-in of new node occurs only after line extend completes.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/scene/lens/LensToggleController.ts`
+* `/apps/web/src/scene/lens/lensToggle.test.ts` (timing assertions via fake timers)
+* Updates to `TimelineSurface.tsx`
+
+**Data Feeding Plan:**
+
+* Source: fixture + current SceneModel.
+* Migration path: same controller used with real data later.
+
+**Quality Gate:**
+
+* Manual script:
+
+  1. Toggle Bio↔Chosen lens repeatedly.
+  2. Observe: line retracts to label, old node fades, new line draws, new node fades in after line arrival.
+* Objective checks:
+
+  * New node opacity remains 0 until line animation completes.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are we swapping data too early?
+  2. Is animation duration inconsistent?
+  3. Are both nodes visible at once?
+* Smallest fix: stage swap after retract, before extend; gate opacity.
+* Retest: run lensToggle.test + manual.
+* Pivot:
+
+  * GPT prompt: “Given this LensToggleController, verify it matches Appendix §3.5 step order. List deviations.”
+
+---
+
+### Step S08 — Implosion (“Suction / Mass Conservation”) Visual (Override D + Appendix §4.5)
+
+**Objective:** Implement the implosion effect where auxiliary UI and hiding nodes “suck into” the Focus bubble (no dissolve).
+
+**Definition of Success (verifiable):**
+
+* Any collapse/hide uses suction transforms into/behind Focus bubble.
+* Focus bubble subtly reacts (mass-conservation feel).
+
+**Dependencies:** S05 (Focus exists), S04 (RAF infra).
+
+**Inputs:**
+
+* Override D (implosion suction; no dissolve)
+* Appendix §4.5 node feel contract: implosion is packing/clustering, not fading 
+* FSM ignition mentions fast implosion (feel) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (animation tuning)
+* Mode: Implementation + QA
+
+#### Concrete Animation Recipe (implement now)
+
+**Targets that implode**
+
+* Nav pill elements (except Focus itself), “+” button, open info cards, sibling drawer, overflow lists, any auxiliary controls.
+
+**Transforms**
+
+* For each element `E` at position `pE`, Focus center `pF`:
+
+  * animate `transform: translate(pF - pE) scale(0.15)` over `IMPLOSION_DURATION_MS`
+  * animate `opacity: 1 → 0.2` (not 0) while moving
+  * at 80%: set `pointer-events:none`
+  * at 90%: flip `z-index` behind Focus (or move into a “behindFocus” layer)
+  * end: `display:none` (or unmount)
+
+**Easing intent**
+
+* Use an ease-in curve (accelerate into Focus) + slight Focus “absorb” bounce:
+
+  * Focus: scale 1.0 → 1.03 (peak at 60%) → 1.0 by end
+
+**Layering order**
+
+1. Background grid
+2. Memory nodes (if visible)
+3. Aux UI
+4. Imploding elements (move behind Focus near end)
+5. Focus bubble (always top)
+
+**Timing**
+
+* Use `IMPLOSION_DURATION_MS` constant and enforce constant versioning later. 
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `useImplosion()` hook + `ImplosionLayer` that animates a list of DOM refs into Focus center using Web Animations API. Add a demo toggle button to trigger implosion.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/scene/animations/implosion.ts`
+* `/apps/web/src/scene/animations/implosion.test.ts` (duration, final styles)
+* Update: `Surface.tsx` / `TimelineSurface.tsx`
+
+**Data Feeding Plan:** Needs Focus center coordinates from SceneModel.
+
+**Quality Gate (tactile):**
+
+* Objective:
+
+  * No element simply crossfades out without translation toward Focus.
+* Manual vibe script:
+
+  1. Open nav pill + info card + drawer.
+  2. Trigger implosion.
+  3. Confirm suction motion into Focus; Focus subtly “absorbs.”
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are elements unmounting immediately (no animation)?
+  2. Are we missing Focus center coords?
+  3. Is layout shifting mid-animation?
+* Smallest fix: keep element mounted until animation finished; use fixed positioning snapshot.
+* Retest: run demo.
+* Pivot:
+
+  * Grok prompt: “Implosion looks like a fade, not suction. Here’s animation code; propose minimal transform-based fix.”
+
+---
+
+### Step S09 — Physics Constants Module + Versioning Gate (LOCKED §3.7)
+
+**Objective:** Centralize physics constants in `physics/constants.ts`, enforce version bump on changes, and wire constants into implosion/pin/merge timings.
+
+**Definition of Success (verifiable):**
+
+* Constants exist with defaults.
+* A test fails if constants change without bumping `PHYSICS_SPEC_VERSION`.
+
+**Dependencies:** S08.
+
+**Inputs:**
+
+* §3.7 Physics Constants (LOCKED) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (gate design)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create `apps/web/src/physics/constants.ts` exporting constants + PHYSICS_SPEC_VERSION. Add a test that snapshots constants and asserts version bump when snapshot changes.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/physics/constants.ts`
+* `/apps/web/src/physics/constantsVersion.test.ts`
+
+**Data Feeding Plan:** N/A.
+
+**Quality Gate:**
+
+* Versioning test passes.
+* All animation durations reference constants (no magic numbers).
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Duplicate constants in CSS?
+  2. Constants imported in wrong bundle?
+  3. Version test too brittle?
+* Smallest fix: keep one canonical constants file.
+* Retest: run tests.
+* Pivot:
+
+  * GPT prompt: “Design a robust ‘version bump required’ test for constants.ts.”
+
+---
+
+### Step S10 — FSM Core + Sequence A (Vertical Drag DOWN) (LOCKED §3.6)
+
+**Objective:** Implement FSM engine with exact state names and Sequence A behavior: REST → IGNITION → CONVEYOR → ARRIVAL → MERGE.
+
+**Definition of Success (verifiable):**
+
+* FSM state names exactly match spec.
+* Drag down transitions through Sequence A states with expected choreography.
+* Haptic “clunk” is not fired here unless rail lock completion (A2) or pin completion (CONVEYOR). 
+
+**Dependencies:** S04, S06, S08, S09.
+
+**Inputs:**
+
+* §3.6 FSM binding names and Sequence A definitions 
+* Focus/Label/Parents positions in REST (lower-third / center / upper-third) 
+* IGNITION implosion note 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (tuning)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `FSMController` with sequences and states exactly named per Appendix. Implement Sequence A: on drag start DOWN → IGNITION; at threshold → CONVEYOR; continue → ARRIVAL; on release beyond threshold → MERGE; else snap back to REST. Integrate with scene positions and implosion triggers.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/physics/fsm/FSMController.ts`
+* `/apps/web/src/physics/fsm/fsmTypes.ts` (state unions)
+* `/apps/web/src/physics/fsm/sequenceA.test.ts`
+* `/apps/web/src/scene/SceneLayout.ts` (computes node positions by FSM)
+
+**Data Feeding Plan:**
+
+* Source: fixture `FocusSliceUi` with memory nodes placeholders.
+* Sample: `fixtures/memories_fixture.ts` with 10 memory tokens.
+* Migration: in S19, memories come from DB; but UI contract remains.
+
+**Quality Gate (tactile):**
+
+* Objective:
+
+  * Drag down: auxiliary UI implodes quickly at drag start.
+  * Conveyor state: memory nodes flow and fade out before hitting pinned focus Y.
+* Manual vibe script:
+
+  1. Start drag down slowly: see implosion, then conveyor belt behavior.
+  2. Continue dragging: label + parents pulled down 1:1 (ARRIVAL).
+  3. Release: merge animation (MERGE) then enters A2-ready posture.
+* Device coverage: iOS Safari + Android Chrome.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are state transitions based on time instead of deltas?
+  2. Is any native scroll happening?
+  3. Are nodes moving via React rerenders?
+* Smallest fix: move motion into RAF refs; tighten thresholds; disable scroll.
+* Retest: run sequenceA.test + manual script.
+* Escalate after 2 fails: revisit rail/FSM coupling design.
+* Pivot:
+
+  * Grok prompt: “Sequence A feels floaty (not 1:1). Here’s FSMController + RailController; propose minimal patch to enforce pixel-locked deltas.”
+
+---
+
+### Step S11 — Sequence A2 Choose Parent (Horizontal Bezier Rail) (LOCKED §3.6)
+
+**Objective:** Implement horizontal choice along Bezier branch with binding thresholds: overlap 100% slow, snapback <90%, flick completion.
+
+**Definition of Success (verifiable):**
+
+* Horizontal drag maps along bezier rail.
+* Opposing branch fades linearly as chosen gains dominance.
+* Threshold behavior matches spec; haptic clunk on lock completion.
+
+**Dependencies:** S10, S06, S09.
+
+**Inputs:**
+
+* Sequence A2 binding rules + thresholds + clunk trigger 
+* Constants: `FLICK_VELOCITY_THRESHOLD`, `SNAPBACK_THRESHOLD` 
+* Haptics clunk allowed triggers 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (gesture feel)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement mapping from horizontal pointer delta to a parameter `t` along left or right bezier branch. Compute overlap% as `t`. Implement snapback <0.90 on release unless flick velocity > threshold. Fire haptic clunk only on lock completion.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/physics/fsm/sequenceA2.ts`
+* `/apps/web/src/physics/fsm/sequenceA2.test.ts`
+* `/apps/web/src/physics/gesture/velocity.ts`
+
+**Data Feeding Plan:**
+
+* Use fixture parents; only changes are scene positions and opacity.
+* Migration: same for real data.
+
+**Quality Gate (tactile):**
+
+* Objective checks:
+
+  * Slow drag requires full overlap (100%).
+  * Release at 0.89 snaps back.
+  * Flick above velocity threshold completes.
+* Manual vibe script:
+
+  1. Slow drag to 95%, release → snapback.
+  2. Drag to 100%, release → lock + clunk.
+  3. Flick quickly from center → auto lock + clunk.
+* Device: iOS Safari + Android Chrome.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Velocity computed in wrong units (px/ms)?
+  2. Overlap calculation inverted?
+  3. Opacity fade not linear?
+* Smallest fix: fix velocity math; add test coverage for threshold.
+* Retest: run sequenceA2.test + manual.
+* Pivot:
+
+  * Grok prompt: “Rail flick auto-complete triggers too easily. Here are thresholds and logs; propose minimal calibration.”
+
+---
+
+### Step S12 — Sequence B Travel to Future (Vertical Drag UP) (LOCKED §3.6)
+
+**Objective:** Implement Sequence B: CLEARANCE → CONVEYOR → MORPH → CONSTRUCTION including spouse restoration and “child birthed” timing.
+
+**Definition of Success (verifiable):**
+
+* Drag up clears stage via implosion.
+* Conveyor pins focus top-center and shows memories rising and fading.
+* Morph moves focus top-left + label to center.
+* Construction: spouse fades in, line draws, stem draws down, child appears only after stem reaches landing point.
+
+**Dependencies:** S10, S06, S08, S09.
+
+**Inputs:**
+
+* Sequence B definitions + feel notes 
+* Haptic clunk on pin completion 
+* Non-goals: no new gestures beyond FSM 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1
+* Mode: Implementation + QA
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement Sequence B state machine triggered by vertical drag UP. Use existing implosion. Implement morph + construction choreography with explicit timing: spouse fade-in, connector draw, stem draw, then child fade-in.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/physics/fsm/sequenceB.ts`
+* `/apps/web/src/physics/fsm/sequenceB.test.ts`
+* Update connector layer to support animated draw length.
+
+**Data Feeding Plan:**
+
+* Fixtures include spouse and child placeholders for future travel.
+* Later, spouse/child come from relationships fetched via repo.
+
+**Quality Gate (tactile):**
+
+* Manual vibe script:
+
+  1. Drag UP: stage clears; movement pixel-locked.
+  2. Pin completion triggers clunk.
+  3. Observe construction order: spouse → connector → stem → child appears (manifest, not slide). 
+* Objective: child opacity stays 0 until stem animation end.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Animations run concurrently when they should be sequential?
+  2. Pinning not consistent?
+  3. New nodes sliding instead of manifesting?
+* Smallest fix: gate each phase with promises/events.
+* Retest: run test + manual.
+* Pivot:
+
+  * Grok prompt: “Construction order wrong. Here’s sequenceB.ts; propose minimal gating changes to enforce spouse→line→stem→child order.”
+
+---
+
+### Step S13 — Core UI Contracts: Nav Pill, Modes, Cards, Drawer (LOCKED §4)
+
+**Objective:** Implement the LOCKED UI components and their interaction rules *without* affecting rail physics.
+
+**Definition of Success (verifiable):**
+
+* Nav pill and floating “+” exist.
+* Read/Edit toggle works; controls appear/disappear by mode.
+* Info cards and sibling drawer behave as specified.
+
+**Dependencies:** S05, S08 (implosion), S07 (lens toggles).
+
+**Inputs:**
+
+* §4.1 nav pill + “+” button 
+* §4.2 modes read/edit 
+* §4.3 info cards constraints 
+* §4.4 sibling drawer rules 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: v0.dev (UI shell ideas), then Cursor for compliance
+* Mode: Implementation + QA
+* Why: UI components are straightforward but must not break tactile surface.
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement nav pill fixed bottom-center with Timeline/Search/Vault tabs and floating ‘+’. Add read/edit toggle top-right. Implement InfoCard popovers with max 2 open. Implement SiblingDrawer anchored near focus.”
+  * “Ensure all these components are in their own layer and do not introduce scroll.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/components/NavPill.tsx`
+* `/apps/web/src/components/CaptureButton.tsx`
+* `/apps/web/src/components/ModeToggle.tsx`
+* `/apps/web/src/components/InfoCard.tsx`
+* `/apps/web/src/components/SiblingDrawer.tsx`
+
+**Data Feeding Plan:**
+
+* Fixtures: focus + parent nodes + a sibling list.
+* Migration: siblings come from `VaultRepo` selection logic in S14.
+
+**Quality Gate:**
+
+* Manual script:
+
+  1. In Read mode: no “+ relative” buttons appear.
+  2. Tap left parent token: popover opens left; focus not recentered.
+  3. Open focus card + one target card; opening third closes oldest.
+  4. Sibling drawer contents change with lens.
+* Objective: nav pill does not scroll; surface still pixel-locked.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Did a component create an overflow scroll container?
+  2. Are pointer events leaking and breaking drag?
+  3. Are popovers causing layout shifts?
+* Smallest fix: use `position: fixed` layers; stop propagation carefully; pointer-events tuning.
+* Retest: manual script.
+* Pivot:
+
+  * Gemini prompt: “Review these React components for performance/pointer event conflicts with the drag surface.”
+
+---
+
+### Step S14 — Client Data Model + Deterministic Selection (slot_hint, >2 parents, siblings)
+
+**Objective:** Implement the deterministic selection rules and repo seam:
+
+* `VaultRepo` interface
+* > 2 parents overflow selection
+* slot_hint and age-based left/right rules
+* sibling computation by lens
+
+**Definition of Success (verifiable):**
+
+* Unit tests cover:
+
+  * solid/dotted classification mapping already done in S06
+  * parent selection priority for >2 parents
+  * slot_hint override persistence behavior
+  * sibling computation rules
+
+**Dependencies:** S13 (UI consumers), S01 (schema names inform types).
+
+**Inputs:**
+
+* §3.3 deterministic placement + slot_hint persistence 
+* §4.6 overflow selection priority and “Other Parents” list 
+* §4.4 sibling computation unambiguous rules 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (rule audit)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create `VaultRepo` interface and `FixtureVaultRepo`. Implement `selectRenderableParents(edges, lensMode)` per §4.6. Implement sibling computation per §4.4. Add vitest tests for all selection rules.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/data/VaultRepo.ts`
+* `/apps/web/src/data/FixtureVaultRepo.ts`
+* `/apps/web/src/data/selection/selectParents.ts`
+* `/apps/web/src/data/selection/selectSiblings.ts`
+* `/apps/web/src/data/selection/*.test.ts`
+* Update focus info card to show “Other Parents” list.
+
+**Data Feeding Plan:**
+
+* Fixtures: `apps/web/src/fixtures/family_fixture.json` with:
+
+  * ≥3 parent edges (mix verified/oral/created_at)
+  * slot_hint variants
+  * sibling edges
+* Migration path:
+
+  * Replace fixture repo with API repo (S16+), keeping selection functions unchanged.
+
+**Quality Gate:**
+
+* Unit tests demonstrate:
+
+  * slot_hint wins
+  * else verified > oral/unverified, then earliest created_at
+* Manual: UI shows only 2 parents; remaining appear in “Other Parents”.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Sorting logic wrong order?
+  2. lens filtering wrong?
+  3. slot_hint treated incorrectly?
+* Smallest fix: adjust comparator; add failing test.
+* Retest: run tests.
+* Pivot:
+
+  * GPT prompt: “Given these edges, which two should render per §4.6? Compare to implementation and pinpoint mismatch.”
+
+---
+
+### Step S15 — Guard Service Skeleton + Better Auth Sessions/Devices (LOCKED §6.1) + Ledger-Safe Logging
+
+**Objective:** Build the “Guard” backend:
+
+* Better Auth integration
+* device/session inventory + revoke flows
+* ledger-safe request logging (no vault content, no raw IP long-term)
+
+**Definition of Success (verifiable):**
+
+* Can create a session, list devices, revoke one, revoke all.
+* Forced revoke hooks exist for password change / key rotation / suspicious activity (even if key rotation is stubbed now). 
+* Logs do not include payloads or decrypted content; ops tables rules respected.
+
+**Dependencies:** S01, S02.
+
+**Inputs:**
+
+* §6.1 Better Auth requirements (LOCKED) 
+* Thick client / dumb server prohibition (no decryption in server) 
+* Ops zero-knowledge logging restrictions (no profile names/emails/payloads/URLs with IDs) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (ledger audit), Gemini (API review)
+* Mode: Implementation + Security review
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `apps/api` with Better Auth. Add endpoints: `/health`, `/sessions` (list), `/sessions/revoke`, `/sessions/revoke_all`. Ensure logs store request_id and route key only.”
+* GPT:
+
+  * “Audit API logs and payloads for Ledger violations.”
+
+**Outputs/Artifacts:**
+
+* `/apps/api/src/server.ts`
+* `/apps/api/src/auth/betterAuth.ts`
+* `/apps/api/src/routes/sessions.ts`
+* `/apps/api/src/logging/logger.ts` (redacting)
+
+**Data Feeding Plan:** API not yet powering UI; used later in S18+.
+
+**Quality Gate (security):**
+
+* Integration test demonstrates device inventory + revoke flows.
+* No endpoint logs raw request bodies by default.
+* If you store any IP, must be HMAC form per ops rules later. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Better Auth session listing not working
+  2. DB connection issues
+  3. Logs leaking request payload
+* Smallest fix: simplify auth to minimal session storage; add explicit redaction middleware.
+* Retest: run integration tests.
+* Pivot:
+
+  * Gemini prompt: “Here’s my Better Auth integration and failing session tests; propose minimal fix.”
+
+---
+
+### Step S16 — Guard: Graph Slice APIs (Profiles + Relationships) + Access Gates Baseline
+
+**Objective:** Implement API endpoints that serve the thick client with:
+
+* Focus profile + its parent relationships
+* create/update profiles and relationships (ciphertext blobs only)
+* enforce family scoping and “membership-based access gates” baseline
+
+**Definition of Success (verifiable):**
+
+* API returns:
+
+  * profiles rows (with `encrypted_profile_blob`)
+  * relationships rows (with kind/evidence/slot_hint plaintext allowed)
+* Server never sees decrypted names/DOB.
+* Basic authorization checks exist (account can only access its family scope).
+
+**Dependencies:** S15, S01.
+
+**Inputs:**
+
+* Schema: profiles/relationships binding columns 
+* Ledger allows relationship_kind/evidence_state/slot_hint plaintext 
+* Server enforces membership-based access gates (architecture) 
+* **NOTE:** membership association mechanism is NOT SPECIFIED IN DOCS beyond concept (see Open Questions).
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (security veto)
+* Mode: Implementation + Security review
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Add endpoints: `GET /graph/focus` returns focus profile + parent relationships (ciphertext blobs only). `POST /profiles` accepts encrypted_profile_blob. `POST /relationships` accepts operational metadata only (relationship_kind/evidence_state/slot_hint) + parent_id/child_id. Enforce family_id scoping and prevent cross-family edges.”
+* GPT:
+
+  * “Check API payloads for any plaintext meaning fields.”
+
+**Outputs/Artifacts:**
+
+* `/apps/api/src/routes/graph.ts`
+* `/apps/api/src/routes/profiles.ts`
+* `/apps/api/src/routes/relationships.ts`
+* `/apps/api/src/db/queries/*.ts`
+* Integration tests.
+
+**Data Feeding Plan:**
+
+* API currently returns ciphertext blobs; `ApiVaultRepo` later decrypts client-side (S18+).
+* For now, UI stays on fixture repo.
+
+**Quality Gate:**
+
+* Integration test verifies:
+
+  * cannot create cross-family edges
+  * relationship metadata stored plaintext only for allowed fields
+* Ledger compliance: no decrypted profile fields appear in API response. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Family scoping missing in SQL WHERE clause
+  2. relationship_kind/evidence_state incorrectly validated
+  3. Logs include payloads
+* Smallest fix: add scoping; strict validation; redaction.
+* Retest: integration tests.
+* Pivot:
+
+  * GPT prompt: “Red-team this endpoint for leakage. Here’s request/response; identify violations vs §2.1–§2.3.”
+
+---
+
+### Step S17 — Non-Blocking Crypto Worker (Override G) + Primitives (LOCKED §8.1–§8.2)
+
+**Objective:** Implement crypto module that runs off-main-thread:
+
+* KDF: Argon2id preferred / PBKDF2 fallback
+* AES‑256‑GCM
+* Sealed box envelopes (libsodium.js) preferred
+* Progress reporting for grandma-simple UX
+
+**Definition of Success (verifiable):**
+
+* Worker derives ARK without blocking main thread.
+* Encrypting a 50MB file in worker does not stutter drag (measured).
+* APIs exist: `deriveArk()`, `encryptBlob()`, `decryptBlob()`, `wrapKeyForRecipient()`.
+
+**Dependencies:** S04 (tactile), S15 (auth exists), S09 (constants).
+
+**Inputs:**
+
+* Override G (non-blocking crypto outcome)
+* §8.1 primitives (LOCKED) 
+* §8.2 key hierarchy (LOCKED) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok 4.1 (perf), GPT (security review)
+* Mode: Implementation + Perf test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Create `apps/web/src/crypto/worker/cryptoWorker.ts` and `cryptoClient.ts` wrapper. Implement message protocol with progress events. Ensure no crypto runs on main thread.”
+  * “Add perf test harness: while encrypting, allow user to drag; track dropped frames.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/crypto/worker/cryptoWorker.ts`
+* `/apps/web/src/crypto/cryptoClient.ts`
+* `/apps/web/src/crypto/protocol.ts`
+* `/apps/web/src/crypto/perf/cryptoPerfHarness.tsx`
+
+**Data Feeding Plan:**
+
+* Use generated random buffers and local File objects.
+* No server dependency.
+
+**Quality Gate (STOP‑THE‑LINE for Override G):**
+
+* Objective checks:
+
+  * Main thread frame time remains under 16.7ms for 95th percentile during encryption test (desktop), and under 33ms on mobile target devices.
+  * Drag remains responsive while worker encrypts.
+* UX:
+
+  * Provide simple progress labels: “Deriving Keys…”, “Encrypting…”, “Uploading…” (later). 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Is KDF/encrypt accidentally running on main thread?
+  2. Are we copying huge buffers back/forth (no Transferable)?
+  3. Are we doing DOM work each progress update?
+* Smallest fix: use Transferable ArrayBuffers; throttle progress events; keep UI updates coarse.
+* Retest: run harness.
+* Pivot:
+
+  * Grok prompt: “Crypto worker still causes UI jank. Here’s message protocol and perf logs; propose minimal patch.”
+
+---
+
+### Step S18 — Registration & Key Setup Modal (LOCKED §5.0) + Auth Integration
+
+**Objective:** Implement onboarding per Appendix:
+
+* email + password (vault secret) + no-recovery checkbox
+* deriving keys progress state
+* derive ARK client-side; generate AKMK; encrypt AKMK under ARK for server storage
+* complete Better Auth account creation
+* enforce invariant: raw password and derived keys never appear in network payloads
+
+**Definition of Success (verifiable):**
+
+* UI exactly matches required fields, validation, disabled states.
+* Network requests do not contain raw password or derived keys (packet-sniffable). 
+
+**Dependencies:** S17, S15.
+
+**Inputs:**
+
+* §5.0 Registration & Key Setup requirements (LOCKED) 
+* Hard security invariant (network payload) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (threat model), v0.dev (form UI sketch)
+* Mode: Implementation + Security QA
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement Create Account modal per §5.0. On submit: show ‘Deriving Vault Keys…’ state, run deriveArk in crypto worker, generate AKMK, encrypt it under ARK (AES‑GCM), send only encrypted AKMK + salt + email to server. Ensure raw password never leaves client.”
+* GPT:
+
+  * “Design packet-sniff checklist for this flow and confirm payload safety.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/modals/RegistrationKeySetupModal.tsx`
+* `/apps/web/src/auth/onboarding.ts`
+* `/apps/api/src/routes/accountKeys.ts` (store encrypted AKMK + salt)
+* `/apps/api/src/db/account_keys.sql` or migration if needed (**see Open Questions**)
+
+**Data Feeding Plan:**
+
+* Uses crypto worker; server stores encrypted AKMK blob.
+* Migration path: if we later switch to passkeys, ARK derivation secret changes but storage remains encrypted AKMK.
+
+**Quality Gate (security + UX):**
+
+* UX:
+
+  * Button disabled until checkbox checked and password valid.
+  * “Deriving Vault Keys…” disables inputs. 
+* Ledger:
+
+  * Server stores only encrypted AKMK (ciphertext).
+* Ciphertext-only verification:
+
+  * Packet-sniff shows no raw password in any request body. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Did we accidentally send password to Better Auth?
+  2. Are we logging form values?
+  3. Is encrypted AKMK mis-serialized (base64 vs bytes)?
+* Smallest fix: remove password from any network; ensure only email + encrypted blobs.
+* Retest: packet sniff; run unit tests.
+* Pivot:
+
+  * GPT prompt: “Here is my signup request payload; verify compliance with ‘raw password never in network’ invariant and propose redesign if violated.”
+
+---
+
+### Step S19 — Secure Upload Modal + Encrypt‑Before‑Upload Pipeline (LOCKED §1.3 + §5.1)
+
+**Objective:** Implement the capture flow:
+
+* modal fields + validation
+* kiosk fast path defaults
+* encrypt raw bytes + metadata before upload
+* presigned URL from Guard
+* upload ciphertext to MinIO
+* create memories + memory_blobs + key_envelopes rows
+
+**Definition of Success (verifiable):**
+
+* Upload modal behaves per §5.1.
+* Raw bytes never leave device unencrypted.
+* DB rows match §7.1 names.
+* Key envelope rows created according to privacy_level.
+
+**Dependencies:** S17, S16, S02.
+
+**Inputs:**
+
+* Upload flow (non-optional) §1.3 
+* §5.1 Secure Upload Modal spec (LOCKED) 
+* Schema: memories/memory_blobs/key_envelopes binding columns 
+* Ledger: raw media bytes must be ciphertext-only 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (ledger audit), Grok (perf)
+* Mode: Implementation + Security QA
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement SecureUploadModal per §5.1 with required fields and kiosk defaults. On submit: encrypt file bytes + encrypted metadata blob in crypto worker, request presigned upload URL from Guard (send only mime_type + ciphertext_size), upload ciphertext to MinIO, then create DB rows for memories, memory_blobs, key_envelopes.”
+* GPT:
+
+  * “Audit payloads vs ledger: ensure no plaintext title/description/date/DOB etc are sent.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/modals/SecureUploadModal.tsx`
+* `/apps/web/src/upload/uploadFlow.ts`
+* `/apps/api/src/routes/uploads.ts` (presign)
+* `/apps/api/src/routes/memories.ts` (create rows)
+* `/apps/api/src/storage/minioPresign.ts`
+
+**Data Feeding Plan:**
+
+* Uses live MinIO + Postgres.
+* UI remains driven by repo; after upload, it can optimistically insert a memory node in local state.
+
+**Quality Gate (LOCKED + Ledger):**
+
+* UX:
+
+  * Accept only image/video/audio; reject others. 
+  * Date cannot be future; approximate supported; stored encrypted. 
+  * Privacy default private; kiosk defaults prefilled; “More details” collapsed. 
+  * Progress states: Encrypting (0–50), Uploading (50–100). 
+* Security:
+
+  * Packet-sniff shows ciphertext bytes only; no plaintext content or keys. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are we accidentally uploading the raw File directly?
+  2. Is metadata blob being sent plaintext to server?
+  3. Is encryption happening on main thread?
+* Smallest fix: enforce encrypt step; worker-only; validate payload builder.
+* Retest: sniff + upload a sample.
+* Pivot:
+
+  * GPT prompt: “Here’s the upload request sequence and payloads; identify any plaintext leakage vs §2.1/§5.1 and propose minimal fix.”
+
+---
+
+### Step S20 — Access Control Modal + Key Envelopes (LOCKED §5.3 + §8.3)
+
+**Objective:** Implement access ring toggles:
+
+* family always enabled
+* inner circle toggle
+* custodian toggle for minors
+* toggling ON creates envelopes; OFF revokes/deletes envelopes
+* show truth-in-security note
+
+**Definition of Success (verifiable):**
+
+* Modal exists and is reachable via gear in expanded card (Edit mode).
+* Envelopes created/revoked in `key_envelopes`.
+* Truth-in-security note is displayed.
+
+**Dependencies:** S19, S14, S16.
+
+**Inputs:**
+
+* §5.3 Access Control Modal spec (LOCKED) 
+* §8.3 revocation semantics (LOCKED) 
+* Schema: key_envelopes table columns 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (security semantics)
+* Mode: Implementation + Review
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement AccessControlModal per §5.3. Add Guard endpoints to create/revoke envelopes for subject_profile_id + recipient_account_id. Ensure UI shows revocation note.”
+* GPT:
+
+  * “Review envelope create/revoke flows for ledger compliance and truth-in-security messaging.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/modals/AccessControlModal.tsx`
+* `/apps/api/src/routes/envelopes.ts`
+* `/apps/api/src/db/envelopes.ts`
+* Tests: integration for envelope creation + revocation
+
+**Data Feeding Plan:**
+
+* Uses live DB `key_envelopes`.
+* Crypto: wrap keys using worker; server stores wrapped_key only.
+
+**Quality Gate:**
+
+* Ledger:
+
+  * wrapped_key is ciphertext; no plaintext keys in API. 
+* UX:
+
+  * truth-in-security note shown somewhere in flow. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Are we accidentally logging wrapped_key?
+  2. Are we creating envelope rows without family scoping?
+  3. UI toggle state not reflecting server state?
+* Smallest fix: redact logs; enforce family_id; fetch current envelope state.
+* Retest: integration tests + manual toggle.
+* Pivot:
+
+  * GPT prompt: “Given this envelope API, confirm it satisfies §5.3 actions and §8.3 semantics.”
+
+---
+
+### Step S21 — Zero‑Knowledge Search (LOCKED §8.4) + Search UI Hook
+
+**Objective:** Implement blind-index token generation client-side and token matching server-side.
+
+**Definition of Success (verifiable):**
+
+* Client normalizes term and computes token = HMAC(K_search, normalized_term).
+* Server matches tokens against `blind_index_tokens.token` without plaintext.
+* Search tab returns memory IDs; client decrypts metadata locally to display.
+
+**Dependencies:** S19, S17.
+
+**Inputs:**
+
+* §8.4 blind indexing (LOCKED) 
+* Search flow note §1.3 
+* Schema: blind_index_tokens table 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (crypto correctness)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `searchTokens.ts` in crypto module: normalize(term) and HMAC with K_search. On memory create/update, store tokens in blind_index_tokens. Implement search endpoint that returns matching memory_id list.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/search/searchTokens.ts`
+* `/apps/api/src/routes/search.ts`
+* `/apps/api/src/db/search.ts`
+* Tests: token determinism + search match
+
+**Data Feeding Plan:**
+
+* Uses existing memory metadata encryption pipeline; tokens generated from decrypted title/desc (client-only) at time of upload/edit.
+
+**Quality Gate:**
+
+* Ledger: server never sees plaintext search term beyond token.
+* Manual: search for a known title returns the memory.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Normalization mismatch between create vs query
+  2. HMAC key derivation wrong
+  3. Index missing
+* Smallest fix: centralize normalization; add db index on token.
+* Retest: run tests + manual search.
+* Pivot:
+
+  * GPT prompt: “Given these token examples, why doesn’t search match? Diagnose normalization/HMAC issues.”
+
+---
+
+### Step S22 — Custody Table + Eligibility Gate (LOCKED §9.1)
+
+**Objective:** Implement custody structures and server-side time lock gate.
+
+**Definition of Success (verifiable):**
+
+* `custody` table exists and is used.
+* Server blocks transfer requests before eligible_at.
+* eligible_at stored plaintext as operational gate; DOB remains encrypted.
+
+**Dependencies:** S01, S16, S20.
+
+**Inputs:**
+
+* §9.1 Custody model + eligible_at semantics (LOCKED) 
+* Ledger allows custody.eligible_at plaintext 
+* Production gate requires transfer ownership blocks before eligible_at 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (policy review)
+* Mode: Implementation + Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Add custody table migration per §9.1. Add endpoints to create custody relationship (custodian toggle for minors) and to check eligibility. Enforce server-side block of transfer before eligible_at.”
+
+**Outputs/Artifacts:**
+
+* `/schema/migrations/*_custody.sql`
+* `/apps/api/src/routes/custody.ts`
+* `/apps/api/src/db/custody.ts`
+* Integration tests for eligibility blocking
+
+**Data Feeding Plan:**
+
+* eligible_at computed client-side from encrypted DOB at creation time; stored plaintext.
+* (DOB itself stays inside encrypted_profile_blob.)
+
+**Quality Gate:**
+
+* Transfer endpoint returns 403/blocked if now < eligible_at.
+* No DOB is stored plaintext server-side.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. custody table mismatch with spec columns
+  2. time comparisons timezone bugs
+  3. endpoint bypasses check
+* Smallest fix: use timestamptz consistently; centralize guard.
+* Retest: integration tests with fake time.
+* Pivot:
+
+  * GPT prompt: “Audit my custody schema + endpoints vs §9.1; list mismatches and security bypasses.”
+
+---
+
+### Step S23 — Transfer Ownership Flow (LOCKED §9.2–§9.4) + Forced Session Revocation
+
+**Objective:** Implement the client-side transfer execution and server-side revocations:
+
+* child claims profile
+* new key material generated
+* rotate/rewrap keys as allowed
+* server marks custody transferred
+* revoke custodian envelopes
+* revoke custodian sessions/devices
+
+**Definition of Success (verifiable):**
+
+* Flow cannot run pre-eligible.
+* After transfer:
+
+  * custodian sessions revoked
+  * custody envelopes removed
+  * invariants hold (no server master key; irreversible at envelope layer)
+
+**Dependencies:** S22, S15, S20, S17.
+
+**Inputs:**
+
+* §9.2 burn keys means revoke custody envelopes 
+* §9.3 transfer execution steps 
+* §9.4 post-transfer invariants 
+* Better Auth forced revoke requirement on key rotation/transfer 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (threat model), Grok (flow bugs)
+* Mode: Implementation + Integration Test
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Implement `TransferOwnershipModal` available when now≥eligible_at. Client generates new key material (AKMK_child etc), rewraps envelopes as needed, calls server to mark custody transferred, revoke custodian envelopes, revoke custodian sessions via Better Auth.”
+* GPT:
+
+  * “Red-team transfer: ensure no path allows custodian to retain privileged access post-transfer.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/src/modals/TransferOwnershipModal.tsx`
+* `/apps/web/src/transfer/transferFlow.ts`
+* `/apps/api/src/routes/transfer.ts`
+* `/apps/api/src/routes/sessions.ts` updates for revoke-custodian
+* Integration tests: pre-eligible block, post-transfer revocations
+
+**Data Feeding Plan:**
+
+* Uses custody table + key_envelopes.
+* Client does key generation + wrapping with worker.
+
+**Quality Gate (DoD-critical):**
+
+* Meets readiness checklist item: “Transfer Ownership blocks before eligible_at, rotates keys at/after, revokes custodian sessions.” 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Session revoke not actually invalidating tokens
+  2. Custody envelopes not removed
+  3. Client failing to regenerate/store keys
+* Smallest fix: verify revoke-all endpoint; add server transaction to revoke envelopes + mark custody atomically.
+* Retest: integration tests + manual scenario.
+* Pivot:
+
+  * Grok prompt: “Transfer flow fails at step X with error Y. Here’s code; propose minimal patch preserving §9.3 semantics.”
+
+---
+
+### Step S24 — Ops Metadata (LOCKED §7.3): Geo Fence / Network Rules / Audit Events + Privacy Rules
+
+**Objective:** Implement ops tables and minimal enforcement:
+
+* ops_geo_fence_rules, ops_network_rules, ops_account_activity, ops_security_events, ops_job_runs
+* store IP/User-Agent only as HMAC long-term
+* enforce “no vault content / no emails / no payloads” restriction
+
+**Definition of Success (verifiable):**
+
+* Tables exist with binding columns and constraints.
+* Middleware writes ops_account_activity and ops_security_events with HMAC fingerprints.
+* Retention job exists (even if manual run).
+
+**Dependencies:** S15, S01.
+
+**Inputs:**
+
+* §7.3 ops tables + enums + constraints (LOCKED) 
+* IP storage rule + retention + zero-knowledge restriction 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: GPT‑5.2 Pro (privacy audit)
+* Mode: Implementation + QA
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Add migrations for ops tables and enums per §7.3. Implement middleware: compute ip_hmac and user_agent_hmac; store in ops_account_activity; create ops_security_events for blocks/rate limits/auth successes/failures. Add retention script to purge per policy.”
+
+**Outputs/Artifacts:**
+
+* `/schema/migrations/*_ops_metadata.sql`
+* `/apps/api/src/ops/opsMiddleware.ts`
+* `/apps/api/src/ops/retentionJob.ts`
+* Tests verifying no raw IP persisted.
+
+**Data Feeding Plan:** N/A.
+
+**Quality Gate:**
+
+* Unit/integration tests confirm:
+
+  * raw IP not stored in DB beyond ephemeral logs
+  * ops tables never store vault content (no payload logging)
+* Manual: simulate auth failure and confirm ops_security_events row.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. HMAC secret missing
+  2. Accidentally storing raw IP in a column
+  3. Middleware logs full URL with IDs
+* Smallest fix: centralize request logging, only store route templates.
+* Retest: run tests.
+* Pivot:
+
+  * GPT prompt: “Audit ops middleware for Appendix §7.3 privacy restrictions; list violations and minimal fixes.”
+
+---
+
+### Step S25 — Full Self‑Host Deployment (LOCKED §10)
+
+**Objective:** Produce the production-like docker compose stack:
+
+* reverse proxy
+* lore-web
+* lore-api
+* postgres
+* minio
+
+**Definition of Success (verifiable):**
+
+* A new machine can run `docker compose up` and reach web UI.
+* Upload works end-to-end to MinIO.
+* No cloud-only dependencies.
+
+**Dependencies:** S19, S15, S02.
+
+**Inputs:**
+
+* §10.1 no cloud-only dependency (LOCKED) 
+* §10.2 reference deployment components 
+* Backup guidance (non-LOCKED but included) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: Cursor
+* Secondary: Grok (docker networking)
+* Mode: Implementation + QA
+
+**Prompt/Action:**
+
+* Cursor:
+
+  * “Add dockerfiles for apps/web and apps/api. Update docker-compose.yml to include reverse proxy (Caddy), lore-web, lore-api, postgres, minio. Add environment docs and health checks.”
+
+**Outputs/Artifacts:**
+
+* `/apps/web/Dockerfile`
+* `/apps/api/Dockerfile`
+* `/ops/Caddyfile`
+* `/docker-compose.prod.yml`
+* `/docs/deploy_self_host.md`
+
+**Data Feeding Plan:** N/A.
+
+**Quality Gate:**
+
+* Clean deploy smoke test passes: login, upload, view timeline.
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. reverse proxy routing wrong
+  2. env vars missing (minio credentials)
+  3. CORS issues for presigned URLs
+* Smallest fix: fix proxy routes; set correct origin; tighten CORS.
+* Retest: redeploy.
+* Pivot:
+
+  * Grok prompt: “Docker compose self-host deploy fails. Here are logs + compose; propose minimal fix.”
+
+---
+
+### Step S26 — Production Readiness Gate (LOCKED §12) + Final QA
+
+**Objective:** Pass the official launch gates.
+
+**Definition of Success (verifiable):**
+All §12 items pass with evidence.
+
+**Dependencies:** All prior steps.
+
+**Inputs:**
+
+* §12 Production Readiness Checklist (LOCKED) 
+
+**Tooling & Workflow Strategy:**
+
+* Primary Tool: QA (human + devices) + Cursor for fixes
+* Secondary: GPT‑5.2 Pro (ledger audit), Grok (perf)
+* Mode: QA + Red-team
+
+**Prompt/Action:**
+
+* Run:
+
+  * physics test suite
+  * packet-sniff test
+  * session inventory/revoke-all manual verification
+  * upload modal UX validation
+  * connector truth table visual validation
+  * transfer ownership scenarios
+
+**Outputs/Artifacts:**
+
+* `/docs/launch_evidence/`
+
+  * `physics_device_videos/`
+  * `packet_sniff_logs/`
+  * `session_revoke_screens/`
+  * `transfer_flow_screens/`
+* Test reports in CI artifacts.
+
+**Data Feeding Plan:** Live stack + seeded DB.
+
+**Quality Gate (LOCKED):**
+
+* Physics constants versioned and tested on iOS Safari + Android Chrome + desktop. 
+* Packet-sniff proves no plaintext content or keys leave device. 
+* Device/session inventory + revoke-all verified. 
+* Upload modal defaults to Private, validates date, shows encrypt/upload progress. 
+* Relationship rendering shows solid vs dotted based on schema. 
+* Transfer Ownership blocks before eligible_at, rotates keys at/after, revokes custodian sessions. 
+
+**Failure Loop:**
+
+* Diagnose:
+
+  1. Identify which exact checklist bullet failed.
+  2. Reproduce with minimal steps.
+  3. Decide if it’s physics, ledger, auth, or transfer.
+* Smallest fix: patch minimal surface area.
+* Retest: re-run only the failed gate.
+* Rollback: if physics gate fails twice, revert and escalate; if ledger fails once, stop the line.
+* Pivot prompts:
+
+  * Physics: “Diagnose why spring drift breaks 1:1 deltas; propose minimal patch.”
+  * Ledger: “Here is packet-sniff output; identify any plaintext leakage and where it originates in code.”
+
+---
+
+## 3) Decision Checkpoints (Forks in the Road)
+
+1. **Auth method consistent with “no password in network payload”**
+
+* Option A: Passwordless auth (email OTP/magic link or passkey) + vault password only for ARK derivation client-side.
+* Option B: Password auth via Better Auth (would likely transmit password).
+* Recommendation: **A**, because Appendix explicitly states raw password never appears in network payloads. 
+  Decision owner: Architect + Security.
+
+2. **Key envelope crypto library**
+
+* Option A: libsodium.js sealed box (preferred) 
+* Option B: ECDH + HKDF + AES‑GCM fallback 
+* Recommendation: Start with **A** if bundle size acceptable; keep B as fallback behind feature flag.
+  Decision owner: Architect.
+
+3. **Client decrypted data persistence**
+
+* Option A: Decrypted data only in memory (ephemeral); re-derive/unlock each session.
+* Option B: Persist decrypted cache locally (riskier).
+* Recommendation: **A** aligns with sovereignty minimization and avoids local leakage (no spec for persistent decrypted cache). 
+  Decision owner: Security + Product.
+
+4. **Chunked encryption format for large files**
+
+* Option A: Whole-file AES-GCM (simple, may OOM).
+* Option B: Chunked AES-GCM per chunk + manifest (scales, more code).
+* Recommendation: **B** for web-first longevity; still off-main-thread per Override G.
+  Decision owner: Architect.
+
+5. **Membership model (multi-family)**
+
+* Option A: Single-family-per-account MVP derived from profile_claim.
+* Option B: Multi-family membership (needs explicit model).
+* Recommendation: Start with **A** (simpler) but design schema extension path; membership table is NOT SPECIFIED. 
+  Decision owner: Product + Architect.
+
+---
+
+## 4) Definition of Done (Launch Criteria)
+
+Derived directly from Appendix §12 (LOCKED): 
+
+**Launch is allowed only if all evidence exists:**
+
+1. **Physics constants versioned + tested on iOS Safari + Android Chrome + Desktop**
+
+* Evidence: videos + test report + `PHYSICS_SPEC_VERSION` history. 
+
+2. **Packet-sniff proof: no plaintext content or keys leave device**
+
+* Evidence: saved proxy logs + annotated review, covering:
+
+  * registration/key setup
+  * upload flow
+  * search queries
+
+
+3. **Device/session inventory + revoke-all verified**
+
+* Evidence: screenshots + integration tests. 
+
+4. **Upload modal correctness**
+
+* Evidence: manual checklist:
+
+  * default private
+  * date validation (no future)
+  * progress states
+  * kiosk fast path defaults
+
+
+5. **Relationship rendering: solid vs dotted based on schema truth table**
+
+* Evidence: UI demo showing both cases; unit tests on truth table. 
+
+6. **Transfer ownership enforcement**
+
+* Evidence:
+
+  * pre-eligible transfer blocked
+  * post-eligible transfer rotates keys / revokes custodian sessions
+     
+
+---
+
+## 5) Open Questions / Missing Specs
+
+Anything here is **NOT SPECIFIED IN DOCS** (and not closed by Architect Overrides). Each item includes a Sovereign-aligned recommendation.
+
+### 5.1 Membership model: “account ↔ family association(s)”
+
+* Status: **NOT SPECIFIED IN DOCS** (concept exists, but no table/endpoint contract). 
+* Recommendation (Sovereign-aligned): Start MVP with **single family per account** derived from `profile_claims.profile_id → profiles.family_id`. Add explicit membership table later if multi-family becomes required.
+* Risks if chosen differently:
+
+  * If multi-family is needed soon, retrofitting authorization gates later is nontrivial.
+* Decision owner: Product + Architect.
+
+### 5.2 Auth/login flow details under Better Auth
+
+* Status: **NOT SPECIFIED IN DOCS** (only requirements for device inventory/revocation). 
+* Recommendation: Use passkeys or email OTP for authentication, and use password only as vault secret (to satisfy “no password in network payload”). 
+* Risks: More onboarding friction; passkey UX varies by device.
+* Decision owner: Architect + Security + Product.
+
+### 5.3 Profile blob and memory metadata blob internal schemas
+
+* Status: **NOT SPECIFIED IN DOCS** (only says blobs exist and are encrypted). 
+* Recommendation: Versioned JSON (CBOR optional) inside blobs:
+
+  * include `schema_version`, `display_name`, `dob`, `dob_precision`, etc for profile
+  * include `title`, `description`, `event_date`, `approx_precision`, `oral_history_flag`, `people_tags` for memory
+* Risks: Poor schema design can lock you into migrations; mitigate with versioning fields already supported (`profile_blob_version`, `metadata_blob_version`).  
+* Decision owner: Architect.
+
+### 5.4 Custodian Death / Loss / Recovery protocols (mandatory gap detection)
+
+* Status: **NOT SPECIFIED IN DOCS**
+* Recommendation: Add a “Recovery” design that does not violate zero-knowledge:
+
+  * Require child (when eligible) to be ultimate recovery authority.
+  * Before eligible_at, allow *multiple custodians* (2-of-3 style) via custody_bridge envelopes, but this implies additional spec.
+* Risks: Any recovery mechanism risks reintroducing server-held master keys (forbidden). 
+* Decision owner: Security + Legal + Architect.
+
+### 5.5 Shared write authority / conflict resolution (multi-user edits) (mandatory gap detection)
+
+* Status: **NOT SPECIFIED IN DOCS**
+* Recommendation: Adopt server-side “last write wins” for ciphertext blobs with optimistic concurrency via `updated_at`/etag, and keep conflict UI client-side (no server decryption).
+* Risks: Users can overwrite each other; but any semantic merge requires client-side diff tooling.
+* Decision owner: Product + Architect.
+
+### 5.6 Cycle check enforcement specifics
+
+* Status: **NOT SPECIFIED IN DOCS** beyond “application layer + audit job”. 
+* Recommendation: Implement immediate prevention in write path (reject relationship edge that creates cycle) + nightly audit job that logs ops_security_event_type `suspicious_activity` if cycles found (without storing node names).
+* Risks: Poor cycle logic could block valid edits.
+* Decision owner: Architect.
+
+---
+
+## 6) Cursor Build Order Artifact — `TODO.md` (copy/paste ready)
+
+```md
+# TODO.md — Project LORE Build Order (Day 0 → Launch)
+
+> STOP THE LINE RULES:
+> - [ ] If Ledger gate fails ONCE: STOP until fixed (no new features).
+> - [ ] If a tactile gate fails TWICE in a row: STOP + escalate (physics rewire required).
+
+## Phase 0 — Contracts & Scaffold
+- [ ] S00 Repo Bootstrap: `pnpm i && pnpm dev` → apps/web + apps/api running; artifacts: docs/project_rules.md, .cursorrules
+- [ ] S01 Schema Lock + Ledger Matrix: `docker compose up -d postgres` + `pnpm test` → schemaContract tests pass; artifacts: schema/migrations, docs/ledger_field_matrix.md
+- [ ] S02 Dev Stack: `docker compose up` → postgres + minio healthy; bucket created
+
+## Phase 1 — Tactile Surface Foundations (Overrides F + §3.1)
+- [ ] S03 Viewport Stability: run web on iOS Safari + Android Chrome; artifact: docs/launch_evidence/viewport_stability_notes.md
+- [ ] S04 Universal Drag Rail + Pointer Safety: `pnpm test` (rail tests) + device drag test
+- [ ] S05 Scene Graph (Focus/Parents/GenLabel only) + “only these nodes get lines”: `pnpm test` (onlyLinesRule)
+
+## Phase 2 — Geometry & Connectors (Override A/B/C + §3.4)
+- [ ] S06 Curved Bezier Y + Anchors + solid/dotted truth table: `pnpm test` (geometry)
+- [ ] S07 Lens Toggle Unplug/Replug (no crossfade): manual script + timing test
+- [ ] S08 Implosion Suction (mass-conservation feel): record short demo video
+- [ ] S09 Physics constants + PHYSICS_SPEC_VERSION gate: `pnpm test` (version test)
+
+## Phase 3 — FSM Navigation (LOCKED §3.6)
+- [ ] S10 Sequence A (DOWN) REST→MERGE: manual drag script + `pnpm test`
+- [ ] S11 Sequence A2 (Horizontal choose parent): thresholds + clunk; `pnpm test`
+- [ ] S12 Sequence B (UP) CLEARANCE→CONSTRUCTION: spouse→line→stem→child order verified
+
+## Phase 4 — Core UI Contracts (LOCKED §4)
+- [ ] S13 Nav pill + capture “+” + Read/Edit + InfoCards + SiblingDrawer: manual checklist + screenshot evidence
+- [ ] S14 Deterministic selection rules: slot_hint, >2 parents overflow, siblings by lens: `pnpm test`
+
+## Phase 5 — Guard Backend + Auth (LOCKED §6)
+- [ ] S15 Guard skeleton + Better Auth session/device inventory + revoke-all: integration tests pass
+- [ ] S16 Graph slice APIs + family scoping: integration tests pass
+
+## Phase 6 — Crypto (Override G + LOCKED §8)
+- [ ] S17 Crypto Worker: run perf harness; confirm drag remains responsive during encryption
+- [ ] S18 Registration & Key Setup modal: packet-sniff verify “no password/keys in network payload”
+
+## Phase 7 — Upload Pipeline (LOCKED §1.3 + §5.1)
+- [ ] S19 Secure Upload modal + encrypt-before-upload + MinIO + DB rows: packet-sniff proof; upload UX states
+
+## Phase 8 — Access Control + Search + 18-Year Protocol
+- [ ] S20 Access Control modal + envelopes create/revoke + truth-in-security note
+- [ ] S21 Zero-knowledge search tokens + search UI
+- [ ] S22 Custody table + eligible_at enforcement (pre-eligible block)
+- [ ] S23 Transfer ownership flow + revoke custodian sessions (post-eligible)
+
+## Phase 9 — Ops + Deploy + Launch Gate
+- [ ] S24 Ops metadata tables + HMAC IP/UA + retention: verify no raw IP long-term and no payload logging
+- [ ] S25 Full self-host compose: `docker compose -f docker-compose.prod.yml up`
+- [ ] S26 Production Readiness Gate (LOCKED §12): collect evidence artifacts under docs/launch_evidence/
+
+## Architect Override Reminders (Do not forget)
+- Curved Bezier Y geometry (Override A)
+- Explicit anchors & anchor updates (Override B)
+- Only Focus/GenLabel/Parents get lines (Override C)
+- Implosion suction (Override D)
+- Lens Unplug/Replug (Override E)
+- Viewport stability (Override F)
+- Non-blocking crypto (Override G)
+```
+
+---

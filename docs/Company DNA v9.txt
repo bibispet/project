@@ -1,0 +1,129 @@
+Company DNA – Project LORE (Version 9.0 - The "Sovereign Code")
+1. The Core Identity
+Company Name: LORE
+
+
+The One-Liner: A sovereign digital vault that protects family history from cultural erasure today, and secures digital identity from surveillance tomorrow. 
+
+The "Why" (The Civilizational Crisis): We are not just fighting "bit rot." We are fighting the systemic Erase & Exploit cycle: 
+
+The Great Forgetting (Erasure):
+
+
+The Migrant Crisis: With 304 million global migrants, families are fractured by borders and language drift. "Cultural Blur" accelerates—dominant cultures fade into vague labels, and minority cultures vanish. 
+
+
+The Fragmented Narrative: Children inherit broken stories, not roots. Studies link this cultural erosion to identity-related mental health struggles. 
+
+
+Platform Decay: Physical artifacts rot; digital files scatter across incompatible, obsolete clouds. 
+
+The Surveillance Trap (Exploitation):
+
+
+The "1%/99%" Trap: Tools meant for criminals (KYC, blanket monitoring) are applied to innocent families. 
+
+
+The Commodity Child: Platforms mine childhood data for AI training and ad targeting before the child can speak ("Sharenting"). 
+
+2. The Strategic Thesis (The "History" Argument)
+
+The Pattern: "Identity Will Follow Money." Just as money moved from gold → central banks → surveillance (CBDCs), identity is moving from paper → digital platforms → centralized control. 
+
+
+The LORE Response: When trust centralizes, people build private vaults. First it was gold, then crypto. Now, it is LORE for identity. 
+
+The Trojan Horse:
+
+We cannot sell "Decentralized Identity" to a normal parent. 
+
+We sell "The Safe Baby Book" (Immediate emotional value). 
+
+We deliver "The Sovereign Wallet" (Long-term civil rights infrastructure). 
+
+3. The Product: "Grandma-Simple, Fort Knox Secure"
+
+The Interface (The "Tactile Laboratory"): 
+
+Universal Drag (No Scrolling): We explicitly ban native scrolling. The interface uses a 1:1 Universal Drag physics engine. Users feel like they are pulling time itself—dragging a "Conveyor Belt" of memories or pulling previous generations down onto the stage. 
+
+
+
+The Y-Split Topology: At every generation, the path splits physically: Slot A (Left) for Maternal, Slot B (Right) for Paternal. 
+
+
+Verified vs. Oral: We distinguish Biological Facts (Solid Connectors) from Oral/Spiritual History (Dotted Connectors). This captures the "fuzzy bonds" (godparents, step-siblings) that DNA apps ignore. 
+
+
+
+
+Tactile Feedback: The UI performs an "Implosion" to clear clutter during travel and delivers a haptic "Clunk" when locking onto a generation. It feels like a physical machine, not a webpage. 
+
+
+The UX Rule: "Kiosk Mode."
+
+A single prominent “+” button. 
+
+
+≤ 3 taps to capture. No complex menus. If Grandma can't use it, we failed. 
+
+
+The Engine:
+
+Zero-Knowledge by Construction: Data is encrypted before leaving the device. Servers store ciphertext only. We literally cannot see the user's data. 
+
+
+The 18-Year Lock: The "Transfer Ownership" protocol is time-locked. It cannot be triggered until the child reaches majority, at which point keys are rotated and parental access is revoked ("Burned"). 
+
+
+
+4. The Business Model & The "Retention Moat"
+The Product is "Permanence": Users don't buy a safe to store things for a week. The act of signing up is a decision for longevity. 
+
+
+The 18-Year LTV: By designating the parent as "Custodian," we lock in a retention span of nearly two decades. You might switch email providers, but you won't risk moving a cryptographically secured "Life Vault" to a cheaper competitor. 
+
+
+Revenue:
+
+
+Freemium: Entry level (e.g., 50 memories). 
+
+
+"Legacy Protection" Sub: Monthly fee for encryption, high-res storage, and the "18th Birthday" protocol key management. 
+
+5. Target Audience Profiles
+The Privacy Parent (30-50):
+
+
+Fear: AI deepfakes, "Sharenting" regret, and corporate data mining. 
+
+
+Desire: A "Safe Baby Book" where they own the record, not Mark Zuckerberg. 
+
+The Diaspora Family:
+
+
+Pain Point: "My kids don't know who they are." 
+
+
+Need: A system that respects Oral History and Non-Biological Kin (the Dotted Connector feature) because their records are often lost or incomplete. 
+
+
+The Sovereign Gen Z (16-25):
+
+Motivation: They know "Private Mode" is a lie. They want actual ownership of their digital footprint. 
+
+6. The "Red Team" Check (Critical Risks)
+Risk: "Is this just paranoia?"
+
+
+Rebuttal: No. The "Digital Identity" market is hitting $44B by 2025 due to breaches and fraud.  The EU is already mandating digital ID wallets. This is not conspiracy; it is legislation. 
+
+
+Risk: "Why not just use Google Drive?"
+
+Rebuttal: Google Drive is a "flat" file system, not a timeline. It doesn't visualize relationships, it doesn't support "Oral History" (metadata), and crucially, Google scans your files. 
+
+
+LORE is a sovereign vault, not a folder.

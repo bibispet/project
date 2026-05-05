@@ -1,0 +1,1018 @@
+Technical Appendix v9
+
+## PRODUCTION BINDING (The Engineering Bible)
+
+**Status:** Production-Binding
+**Supersedes:** v8.0 and all prior appendices
+**Change Control:** Any section marked **LOCKED** requires **Architect + Product approval** to modify. 
+
+---
+
+## 0. Preamble
+
+Project LORE is not “a family app.” It is a **sovereign family vault**: the “Safe Baby Book” today, and the “Sovereign Wallet” tomorrow. 
+It is built so that families—not platforms—control the canonical record of identity and heritage. 
+
+### 0.1 Immutable Business Requirements **LOCKED**
+
+LORE is a **sovereign, zero‑knowledge family vault** that preserves family history for decades and protects identity from surveillance. 
+
+**Non‑negotiables (binding invariants):**
+
+1. **Kiosk Mode (“Grandma‑Simple”)**: a single prominent **“+”** capture button; **≤ 3 taps** to add a memory. 
+2. **Zero‑Knowledge by construction**: user content is encrypted **before leaving the device**; servers store **ciphertext only**. 
+3. **Verified vs Oral/Chosen**: **solid vs dotted connectors** must exist **end-to-end** (DB → API → Renderer). 
+4. **18‑Year Lock / Transfer Ownership**: transfer protocol is **time‑locked until majority**. 
+5. **No social feed mechanics**: **no likes/followers/viral loops**; this is a **vault/timeline** product. 
+
+### 0.2 Terminology
+
+**Account**: login identity (email / passkey). 
+**Profile**: a person-node in the family graph (can be ghost/unclaimed). 
+**Membership**: account ↔ family association. 
+**Claim**: account ↔ “my profile node” binding. 
+**Memory**: an encrypted media/story artifact attached to a **zone** and **focus profile** (timeline topology), with blobs stored as ciphertext in object storage. 
+
+**UX Physics vocabulary (used throughout this document):**
+
+* **Focus Node**: the currently-centered profile bubble; the anchor point for travel.
+* **Generation Label**: the “G” bubble sitting above/between generations during travel states.
+* **Parents**: two visual slots above the label (Left Slot A, Right Slot B).
+* **Conveyor**: the memory stream moving along a fixed spine (never browser scroll).
+
+---
+
+## 1. System Architecture
+
+### 1.1 Core Principle: Thick Client, Dumb Server **LOCKED**
+
+Client performs: **encryption/decryption, timeline ordering, rendering physics, blind-index generation, key management**. 
+Server performs: **auth/session, authorization gates, rate limits, metadata persistence, ciphertext blob routing**. 
+
+**Hard prohibition:** Server **MUST NOT** contain decryption routines for user vault content. 
+
+### 1.2 Components (Production Contract)
+
+#### A) Frontend (Web‑first, physics‑locked)
+
+* Stack target: React + TypeScript (Next.js acceptable). 
+* Renderer: **custom DOM rail + SVG connector layer**. **No infinite-canvas graph libraries.** 
+* Physics engine: deterministic motion/spring layer with a **hard FSM** (finite state machine). 
+
+#### B) Backend (“Guard”)
+
+* Stateless API + DB. 
+* Issues presigned upload/download URLs for ciphertext blobs (object storage). 
+* Enforces membership-based access gates to ciphertext. 
+
+#### C) Database (Vault Index)
+
+* PostgreSQL (dockerized, self-host). 
+* Relationships stored as adjacency edges; recursive CTE for lineage traversal. 
+
+#### D) Blob Storage (Ciphertext Object Store)
+
+* Default: S3-compatible self-host (MinIO) or filesystem adapter. 
+* Stores only encrypted bytes + minimal operational metadata. 
+
+### 1.3 Reference Data Flows (Non‑Optional)
+
+#### Flow: Create Memory (Upload)
+
+1. Client collects file bytes, immediately stages them in memory (or streaming chunk buffer).
+2. Client derives/selects DEK, encrypts **raw bytes + metadata blob** before any upload. 
+3. Client requests presigned upload URL from Guard (plaintext operational metadata only: mime type, ciphertext size).
+4. Client uploads ciphertext bytes to blob store via presigned URL.
+5. Client creates/updates DB rows:
+
+   * `memories` row with `encrypted_metadata_blob`, `privacy_level`, `timeline_sort_key`, zone fields. 
+   * `memory_blobs` row with `ciphertext_sha256`, `ciphertext_size`, `mime_type`, `object_key`. 
+   * `key_envelopes` rows for DEK distribution by privacy. 
+
+#### Flow: Fetch Memory (Read)
+
+1. Guard authorizes request (membership + privacy envelope existence).
+2. Guard returns presigned download URL (ciphertext).
+3. Client downloads ciphertext, decrypts locally, renders.
+
+#### Flow: Search (Zero‑Knowledge)
+
+* Client normalizes term → HMAC tokens; server matches tokens without seeing plaintext. 
+
+---
+
+## 2. Data Classification — What is Plaintext vs Ciphertext
+
+### 2.1 Ciphertext **LOCKED** (must never be plaintext server-side)
+
+The following **must be encrypted on client** and must not exist as plaintext on the server:
+
+* Profile “human meaning” fields (name, DOB, bio, photos, notes). 
+* Memory payloads (media bytes, transcripts, story text). 
+* Per-item metadata (title, description, location, tags). 
+* Key material (ring keys, item keys, private keys). 
+
+### 2.2 Plaintext (allowed operational metadata) **LOCKED**
+
+Plaintext is allowed **only** if required for:
+
+* relational integrity
+* paging/querying
+* access gating (who may fetch ciphertext)
+* UI topology needs 
+
+Examples explicitly allowed:
+
+* UUIDs, family scoping IDs
+* relationship edge endpoints (`parent_id`, `child_id`)
+* relationship rendering flags (solid vs dotted)
+* zone + ordering token (opaque)
+* mime type + ciphertext size 
+
+**Sovereignty rule (binding):** If the server can avoid knowing it, it must be ciphertext. 
+
+### 2.3 Classification Ledger (Practical “Sovereignty Check”)
+
+This section is a **design test**: if an engineer proposes adding plaintext fields, they must pass this ledger.
+
+**Plaintext allowed**
+
+* `relationships.relationship_kind`, `relationships.evidence_state`, `relationships.slot_hint`
+  Reason: required for deterministic render topology (solid/dotted, left/right). 
+* `memories.zone_anchor`, `memories.zone_focus_profile_id`, `memories.timeline_sort_key`, `memories.privacy_level`
+  Reason: server must page/sort without decrypting. 
+* `memory_blobs.mime_type`, `ciphertext_size`, `ciphertext_sha256`
+  Reason: streaming & integrity of ciphertext. 
+* `custody.eligible_at`
+  Reason: server-enforced time lock gate (but DOB remains encrypted). 
+
+**Ciphertext required**
+
+* `profiles.encrypted_profile_blob`
+* `memories.encrypted_metadata_blob`
+* all wrapped keys / envelopes
+* all media bytes
+  Reason: Zero‑Knowledge invariants. 
+
+---
+
+## 3. UX: Universal Drag Physics Engine **LOCKED**
+
+This is the heart of LORE: the interface must feel like **physical tokens on a surface** (not “a webpage that scrolls”), while remaining logically deterministic and testable.
+
+### 3.1 Absolute Rule: No Native Scroll Physics **LOCKED**
+
+**BANNED in production UI:**
+
+* wheel/trackpad inertia scrolling controlling timeline traversal 
+* browser native scrolling as the source of truth for position 
+
+**Required implementation posture:**
+
+* main interaction surface uses `touch-action: none` 
+* uses Pointer Events + pointer capture 
+* all movement computed 1:1 from pointer deltas 
+
+Accessibility: we may provide a setting that maps wheel events → synthetic drag deltas (still 1:1, no inertia). Default OFF. 
+
+### 3.2 Topology (Restricted DAG) **LOCKED**
+
+* **Time axis:** vertical (Y). 
+* **Lineage axis:** horizontal (X). 
+* **Render window:** max **2 generations** (Focus + Parents). 
+* Above Focus: Y-split into Left (Slot A) and Right (Slot B). 
+
+**Engineering interpretation (binding):**
+Even if deeper lineage exists in DB, the renderer must never show more than Focus + Parents at once. Deeper navigation happens by travel sequences, not by drawing more nodes.
+
+### 3.3 Deterministic Placement Rules **LOCKED**
+
+* Standard: biological mother → left, biological father → right. 
+* Same-sex / ambiguous: older partner → left, younger → right (deterministic). 
+* Override: Edit-mode “Swap Left/Right” writes a persistent layout override. 
+
+**v9.0 Clarification (Production Binding):**
+“Layout override” is implemented by persisting `relationships.slot_hint = left|right` per edge (no separate override table required). 
+
+### 3.4 Connector Styles **LOCKED**
+
+We must render:
+
+* **Solid:** verified biological 
+* **Dotted:** oral/spiritual/chosen/step/unverified 
+
+**v9.0 Rendering Truth Table (unambiguous):**
+
+* Render **SOLID** iff:
+
+  * `relationship_kind == biological` AND
+  * `evidence_state == verified`
+* Render **DOTTED** otherwise (including `chosen`, `oral`, `unverified`).
+
+This rule exactly matches the product promise that “verified facts” are distinct from oral/spiritual bonds. 
+
+### 3.5 Lens Toggle Behavior (Bio ↔ Chosen) **LOCKED animation sequence**
+
+When toggling lens:
+
+1. retract existing connector line back into generation label
+2. fade out old node
+3. draw new connector (solid or dotted)
+4. fade in new node only **after** line reaches target 
+
+**Tactile interpretation (the “unplug / re‑plug”):** the UI must *physically demonstrate* that the nature of the bond changed, not merely that content swapped.
+
+### 3.6 FSM: Navigation Sequences **LOCKED**
+
+FSM states and names are **binding**. 
+Each state below includes:
+
+* **Definition (Logic):** what must be true, what deltas apply, what clamps exist
+* **Description (Feel):** what the user perceives (the “tactile story”)
+
+---
+
+## Sequence A: Travel to Past (Vertical Drag DOWN)
+
+### STATE 0: REST
+
+**Definition (Logic):**
+
+* Focus anchored at lower-third.
+* Gen label centered.
+* Parents at upper-third. 
+
+**Description (Feel):**
+
+* The system is “assembled”: a clean Y-structure with two parent tokens resting above, ready to be entered.
+
+### STATE 1: IGNITION
+
+**Definition (Logic):**
+
+* Trigger: pointer drag begins (DOWN).
+* Focus subtly pins lower (begins transition into pinned mode). 
+
+**Description (Feel):**
+
+* The UI performs a fast **“implosion”**: auxiliary buttons collapse into the Focus node like it’s packing its bags for travel. 
+* This implosion is deliberately *faster* than the main travel movement to communicate readiness (no clutter while moving).
+
+### STATE 2: CONVEYOR
+
+**Definition (Logic):**
+
+* Focus is pinned.
+* Memory nodes flow along fixed spine.
+* Memories fade out before pinned Focus Y. 
+
+**Description (Feel):**
+
+* The screen becomes a **conveyor belt**: memories approach along the spine, slide past the user’s “hand,” then gently vanish just before colliding with the pinned token. 
+* There is no scroll inertia; the user feels like they are pulling time itself, 1:1.
+
+### STATE 3: ARRIVAL
+
+**Definition (Logic):**
+
+* User continues drag.
+* Label + parents are pulled down 1:1 with pointer deltas. 
+
+**Description (Feel):**
+
+* The conveyor stops being a belt and becomes a tether: the user is now dragging the next generation down onto the stage.
+
+### STATE 4: MERGE
+
+**Definition (Logic):**
+
+* Pinned focus merges into label.
+* Label becomes new anchor for horizontal choice. 
+
+**Description (Feel):**
+
+* The Focus node “hands off” its identity into the Generation Label—like a token snapping into a socket—clearing the stage for left/right choice. 
+
+---
+
+## Sequence A2: Choose Parent (Horizontal “Rail”)
+
+**Definition (Logic):**
+
+* Global horizontal drag maps to movement along the bezier rail.
+* Opposing branch fades linearly.
+* Threshold rule is binding:
+
+  * low velocity → must reach 100% overlap
+  * release at <90% → snap back
+  * high velocity flick → completes automatically 
+
+**Description (Feel):**
+
+* The user is not “panning a camera.” They are **pulling a parent bubble down the branch** and planting it into the center. 
+* The opposing parent fades as the chosen one gains dominance, like two possibilities collapsing into a single committed path. 
+
+**The “Grandma Drag” vs “Gen‑Z Flick” (tactile contract):**
+
+* Slow, deliberate motion must require full placement (100%)—no surprise auto-complete. 
+* Fast flick throws the token into place (velocity thresholded completion). 
+
+**Completion event:**
+
+* On lock completion: fire a distinct haptic **“clunk.”** 
+* The subsequent growth animation draws stem and reveals parents only after lines reach their coordinates. 
+
+---
+
+## Sequence B: Travel to Future (Vertical Drag UP)
+
+### STATE 1: CLEARANCE
+
+**Definition (Logic):**
+
+* Label + grandparents pulled off-screen 1:1. 
+
+**Description (Feel):**
+
+* The interface clears the stage; the same “implosion” happens at the start—buttons collapse inward to remove clutter. 
+* Movement is pixel-locked (no autonomous scroll), creating direct manipulation confidence. 
+
+### STATE 2: CONVEYOR
+
+**Definition (Logic):**
+
+* Vertical rail extends down.
+* Focus pins top-center. 
+
+**Description (Feel):**
+
+* The rail becomes a hanging track beneath the pinned parent token. Memories rise upward along it, fading before impact. 
+* On pin completion, fire the “clunk” (pin lock). 
+
+### STATE 3: MORPH
+
+**Definition (Logic):**
+
+* Focus slides to top-left while label slides to center (simultaneous). 
+
+**Description (Feel):**
+
+* Two anchors move at once; the straight tension cable relaxes into a curved branch (a controlled morph, not user-driven). 
+
+### STATE 4: CONSTRUCTION
+
+**Definition (Logic):**
+
+* Spouse fades in.
+* Line draws.
+* Stem draws down.
+* Child fades in (“birthed”). 
+
+**Description (Feel):**
+
+* The next generation is assembled like circuitry:
+
+  * spouse appears as a counterpart
+  * connectors are drawn first
+  * only when the stem reaches the landing point does the child appear—**not sliding**, but **manifesting** into place. 
+
+---
+
+### 3.7 Physics Constants **LOCKED**
+
+All constants live in `physics/constants.ts` and are versioned. 
+Defaults (until canonical numbers are provided):
+
+* `FLICK_VELOCITY_THRESHOLD = 1.2 px/ms`
+* `SNAPBACK_THRESHOLD = 0.90`
+* `IMPLOSION_DURATION_MS = 120`
+* `PIN_DURATION_MS = 180`
+* `MERGE_DURATION_MS = 160`
+* `MEMORY_FADEOUT_DISTANCE_PX = 80` 
+
+Changing any constant requires bumping `PHYSICS_SPEC_VERSION`. 
+
+### 3.8 Haptics **LOCKED**
+
+* Web: Vibration API if available; else audio/tactile fallback. 
+* “Clunk” fired only on:
+
+  * rail lock completion
+  * conveyor pin completion 
+
+### 3.9 Pointer Safety & Error States (v9.0 Clarification)
+
+To preserve determinism across devices:
+
+* Pointer capture must be acquired on drag start and released on completion/cancel.
+* On `pointercancel`:
+
+  * immediately transition to a safe snapback animation for the current sequence
+  * return to STATE 0: REST
+* Multitouch: only the first pointer is authoritative; additional pointers are ignored until release.
+
+---
+
+## 4. Core UI Contracts (Production UI)
+
+### 4.1 Global Navigation Pill **LOCKED**
+
+Bottom-center blurred pill with:
+
+* Timeline
+* Search (blind index)
+* Vault (grid) 
+
+Floating prominent “+” capture button above the pill. 
+
+### 4.2 Modes **LOCKED**
+
+Top-right toggle: **Read ↔ Edit**. 
+
+* Read: no “+ relative” buttons; safe browsing. 
+* Edit: enables add-relative affordances and metadata editing. 
+
+### 4.3 Info Cards **LOCKED**
+
+* Tapping non-centered node opens mini popover **without recentering**. 
+* Max 2 cards open: Focus + 1 target. 
+* Left nodes → popover left; right nodes → popover right. 
+
+**v9.0 Clarification (from user-case “Manage Access Rings”):**
+The “gear” entry point is only available in the **expanded** profile card in **Edit mode**, consistent with the production modal contract. 
+
+### 4.4 Sibling Drawer **LOCKED**
+
+Adjacent to Focus node: Siblings button opens horizontal drawer. 
+Drawer content obeys Bio/Chosen lens:
+
+* Bio = biological siblings only
+* Chosen = includes step/half/adopted where defined 
+
+**v9.0 Clarification (unambiguous):**
+
+* **Bio lens sibling computation:** siblings share **≥1 biological parent edge** with Focus.
+* **Chosen lens sibling computation:** bio siblings + siblings connected via chosen edges (step/adoptive/guardian-like semantics), as represented by `relationship_kind=chosen`.
+
+### 4.5 Visual System (Tactile “Laboratory” Feel)
+
+The aesthetic should feel like **physical tokens resting on a surface**—scientific but warm. 
+
+* Background: off-white with subtle dot grid. 
+* Lighting: consistent soft shadows from top-left. 
+
+**Node feel contract:**
+
+* Nodes must have a slight “raised” affordance and a press/depress interaction to mimic tactile buttons.
+* The “implosion” should feel like objects collapsing into the Focus bubble (packing/clustering), not fading away.
+
+### 4.6 Empty Slots & Complex Families (v9.0 Gap Closure)
+
+The topology is constrained to two parent slots visually, but real families can exceed two parent-like relationships.
+
+**Binding rule:** the renderer never shows more than two parents at a time (Left Slot A / Right Slot B). 
+
+**Overflow strategy (production requirement):**
+
+* If >2 parent relationships exist in the active lens:
+
+  1. Select the two that render by priority:
+
+     * explicit `slot_hint=left/right` wins
+     * else deterministic selection using (a) verified over oral/unverified, then (b) earliest `created_at`
+  2. The remaining parents appear in an **“Other Parents”** list inside the Focus node’s expanded card (Read mode) and are editable in Edit mode.
+
+**Empty slot behavior:**
+
+* Read mode: empty parent slot renders as blank space (no placeholder).
+* Edit mode: empty parent slot renders a subtle **“+ Add Parent”** affordance anchored to that slot (but only for the Focus node, consistent with “only attachable from current Focus node”). 
+
+---
+
+## 5. Production Modals (Hard Spec)
+
+### 5.0 Registration & Key Setup **LOCKED** (v9.0 Addition)
+
+This section is added to satisfy the **User Registration & Key Gen** user-case requirements (while modernizing the outdated stack references).
+
+**Goal:** onboarding must truthfully communicate zero‑knowledge: **no password recovery**, keys derived client-side, and visible progress during derivation.
+
+**Screen: Create Account**
+
+* **Email** (required)
+
+  * validation: standard email format
+  * error: `Account already exists. Try logging in.`
+* **Password** (required if not passkey)
+
+  * min length: 12 characters
+  * must contain: ≥1 number, ≥1 special character
+  * masked by default; “eye” toggle to reveal
+  * **Password strength meter** visible and dynamic
+* **No Recovery Policy** (required checkbox)
+
+  * text: `I understand LORE cannot recover my password.`
+  * **Create Account / Generate Keys button is disabled** until checked
+* **Create Account** button (disabled until all above are satisfied)
+
+**On submit (client-side mandatory sequence):**
+
+1. Enter “Deriving Vault Keys…” loading state
+
+   * disable all inputs
+2. Derive Account Root Key (ARK) using:
+
+   * Argon2id preferred; PBKDF2 fallback for constrained devices 
+3. Generate AKMK (random 32 bytes) and encrypt it under ARK for server storage (server holds only encrypted AKMK). 
+4. Complete Better Auth account creation.
+
+**Hard security invariant:** raw password and derived keys never appear in network payloads.
+
+---
+
+### 5.1 Secure Upload Modal **LOCKED**
+
+**Entry points**
+
+* Global “+” button (always available in Read mode). 
+* Drag-and-drop files onto Timeline/Vault surface (desktop). 
+
+**Required fields**
+
+1. **Attachment** (required)
+
+   * accepted: `image/*`, `video/*`, `audio/*`
+   * reject everything else with explicit error 
+2. **Date** (required)
+
+   * cannot be in the future 
+   * supports “Approximate” toggle:
+
+     * exact date
+     * month/year
+     * year-only
+   * stored encrypted 
+3. **Privacy** (required, default = Private)
+
+   * Private (My Eyes Only) **DEFAULT**
+   * Inner Circle (Close‑Family)
+   * Family 
+   * Default must remain Private (business alignment). 
+4. **Placement** (required)
+
+   * Timeline → Origins / Legacy (auto-suggest based on navigation context)
+   * Vault Only (no timeline node) 
+
+**Optional metadata (encrypted)**
+
+* Title
+* Description
+* People tags (IDs plaintext refs; names encrypted)
+* “Oral History” toggle (flags memory as oral narrative content for UI badging) 
+
+**UX states**
+
+* Step A: Encrypting… (0–50%)
+* Step B: Uploading… (50–100%)
+* Raw file bytes must never leave the device. 
+
+**Kiosk Mode Fast Path (v9.0 Clarification):**
+To preserve “≤3 taps,” the modal must open with:
+
+* Date prefilled = Today (user may edit)
+* Privacy preselected = Private
+* Placement preselected by context
+* “More details” collapsed by default
+
+---
+
+### 5.2 Add Relative Modal **LOCKED**
+
+**Preconditions**
+
+* Only visible in Edit Mode
+* Only attachable from the current Focus node 
+
+**Relationship types (required)**
+
+* Parent
+* Child
+* Spouse/Partner (required for Sequence B “spouse restoration”) 
+
+**Fields (encrypted unless stated)**
+
+* Display name (optional) 
+* DOB (optional) + precision selector:
+
+  * exact / month-year / year-only / unknown 
+* Notes / bio (optional) 
+
+**v9.0 Addition (encrypted, optional, gap closure for blended families):**
+
+* **Relationship label** (dropdown + free text)
+
+  * examples: step-parent, adoptive, guardian, godparent, spiritual, “family friend”
+  * **Storage:** encrypted within the profile blob *or* encrypted relationship metadata blob (client-defined), never plaintext.
+
+**Relationship metadata (plaintext operational)**
+
+* `relationship_kind`: biological | chosen 
+* `evidence_state`: verified | oral | unverified 
+* `slot_preference`: left | right | auto 
+
+  * auto applies deterministic age rule after decrypt on client 
+
+**Validation rules**
+
+* If DOB known for both parent and child: parent DOB must be earlier than child DOB (else block save). 
+* Render topology constraint:
+
+  * no more than 2 parents per child per lens mode (left + right) 
+  * any extras go to “Other Parents” list (Section 4.6).
+
+**Save behavior**
+
+* Create profile if needed (ghost profile allowed).
+* Create relationship edge.
+* UI must render node immediately (optimistic), then reconcile. 
+
+---
+
+### 5.3 Access Control Modal **LOCKED**
+
+**Entry**
+
+* Available via Profile “gear” in expanded card (Edit Mode only). 
+
+**Shows**
+
+* Family (always enabled)
+* Inner Circle toggle
+* Custodian toggle (only if target is a minor profile) 
+
+**Actions**
+
+* toggling ON creates encrypted key envelope(s) for that subject
+* toggling OFF deletes/revokes envelopes 
+
+**Truth-in-security UX note (must be shown somewhere in this flow):**
+Revoking access prevents future decryption via envelope removal; it cannot erase what someone already copied while they had access. 
+
+---
+
+## 6. Auth, Sessions, Devices (Better Auth)
+
+### 6.1 Requirements **LOCKED**
+
+System MUST support:
+
+* device/session inventory
+* revoke one device
+* revoke others
+* revoke all devices 
+
+Forced revoke on:
+
+* password change
+* key rotation / transfer ownership
+* suspicious activity 
+
+### 6.2 Identity Model **LOCKED**
+
+* Account: login identity (email/passkey).
+* Profile: person node in family graph (ghost/unclaimed allowed).
+* Membership: account ↔ family association(s).
+* Claim: account ↔ “my profile node” binding. 
+
+---
+
+## 7. Database Schema (Postgres) — Production Contract
+
+Below is a schema contract. Column names are binding; exact migrations can vary. 
+
+### 7.1 Core Tables (Binding Columns)
+
+**families**
+
+* `id uuid pk`
+* `created_at timestamptz`
+* `name_ciphertext bytea null` 
+
+**profiles**
+
+* `id uuid pk`
+* `family_id uuid fk families(id) index`
+* `is_ghost boolean not null default true`
+* `encrypted_profile_blob bytea not null`
+* `profile_blob_version int not null default 1` 
+
+**profile_claims**
+
+* `profile_id uuid fk profiles(id) unique`
+* `account_id uuid` (from Better Auth user table)
+* `claimed_at timestamptz` 
+
+**relationships**
+
+* `id uuid pk`
+* `family_id uuid fk families(id) index`
+* `parent_id uuid fk profiles(id) index`
+* `child_id uuid fk profiles(id) index`
+* `relationship_kind relationship_kind_enum not null` (biological | chosen)
+* `evidence_state evidence_state_enum not null` (verified | oral | unverified)
+* `slot_hint slot_hint_enum not null default 'auto'` (left | right | auto)
+* `created_at timestamptz` 
+
+Constraints:
+
+* prevent cross-family edges
+* optional uniqueness `(parent_id, child_id, relationship_kind)`
+* cycle checks enforced in application layer + audit job 
+
+**memories**
+
+* `id uuid pk`
+* `family_id uuid fk families(id) index`
+* `owner_profile_id uuid fk profiles(id) index`
+* `zone_anchor zone_enum not null` (origins | legacy | vault_only)
+* `zone_focus_profile_id uuid fk profiles(id) index`
+* `timeline_sort_key text not null`
+* `privacy_level privacy_enum not null default 'private'` (private | inner_circle | family)
+* `encrypted_metadata_blob bytea not null`
+* `metadata_blob_version int not null default 1`
+* `created_at timestamptz` 
+
+**memory_blobs**
+
+* `id uuid pk`
+* `memory_id uuid fk memories(id) index`
+* `storage_provider text not null` (minio|fs|adapter)
+* `object_key text not null`
+* `ciphertext_sha256 bytea not null`
+* `ciphertext_size bigint not null`
+* `mime_type text not null`
+* `created_at timestamptz` 
+
+**key_envelopes**
+
+* `id uuid pk`
+* `family_id uuid fk families(id) index`
+* `subject_profile_id uuid fk profiles(id) index`
+* `recipient_account_id uuid index`
+* `envelope_type text not null` (family_ring_key | inner_ring_key | memory_dek | custody_bridge)
+* `wrapped_key bytea not null`
+* `created_at timestamptz`
+* `revoked_at timestamptz null` 
+
+**blind_index_tokens**
+
+* `memory_id uuid fk memories(id) index`
+* `token bytea index`
+* `field text`
+* `created_at timestamptz` 
+
+### 7.2 Timeline Ordering Token (Production Definition) **LOCKED**
+
+`timeline_sort_key` is generated client-side using fractional indexing:
+
+* lexicographically sortable string (e.g., base62)
+* reveals ordering but not event date
+* supports insertion between two keys without renumbering
+* server sorts purely by this token 
+
+### 7.3 Operational Metadata (v9.1 Addendum) **LOCKED**
+
+**Purpose:** Adds Geo-Fencing, Network Controls, Account Activity Tracking, Audit Logging, and Job Observability to satisfy Operational & Security Hygiene requirements. (Device/session inventory remains in Better Auth per Section 6.)
+
+#### New Enums (Operational)
+
+- `ops_rule_action_enum`: `('allow', 'block', 'rate_limit')`
+- `ops_security_event_type_enum`: `('geo_fence_block', 'ip_rule_block', 'rate_limited', 'auth_success', 'auth_failure', 'suspicious_activity', 'access_control_change')`
+- `ops_job_status_enum`: `('running', 'success', 'failed')`
+
+#### New Table: `ops_geo_fence_rules`
+
+- `id`: uuid pk
+- `country_code`: char(2) NOT NULL (ISO 3166-1 alpha-2)
+- `action`: ops_rule_action_enum NOT NULL
+- `reason`: text NULL
+- `scope`: text NOT NULL DEFAULT 'global'
+- `created_at`: timestamptz NOT NULL DEFAULT now()
+- `updated_at`: timestamptz NOT NULL DEFAULT now()
+- `created_by_account_id`: uuid NULL
+- **Constraint:** Unique index on (`scope`, `country_code`)
+
+#### New Table: `ops_network_rules`
+
+- `id`: uuid pk
+- `ip_cidr`: cidr NULL
+- `asn`: integer NULL
+- `action`: ops_rule_action_enum NOT NULL
+- `reason`: text NULL
+- `created_at`: timestamptz NOT NULL DEFAULT now()
+- `expires_at`: timestamptz NULL
+- `created_by_account_id`: uuid NULL
+- **Constraint (binding):** Exactly one of (`ip_cidr`, `asn`) must be set (XOR).  
+  i.e., `(ip_cidr IS NOT NULL AND asn IS NULL) OR (ip_cidr IS NULL AND asn IS NOT NULL)`
+
+#### New Table: `ops_account_activity`
+
+- `account_id`: uuid pk
+- `first_seen_at`: timestamptz NOT NULL DEFAULT now()
+- `last_seen_at`: timestamptz NULL
+- `last_seen_country_code`: char(2) NULL
+- `last_seen_asn`: integer NULL
+- `last_seen_ip_hmac`: bytea NULL (Privacy-preserving fingerprint; DO NOT store raw IP long-term)
+- `last_seen_user_agent_hmac`: bytea NULL
+
+#### New Table: `ops_security_events`
+
+- `id`: uuid pk
+- `occurred_at`: timestamptz NOT NULL DEFAULT now()
+- `event_type`: ops_security_event_type_enum NOT NULL
+- `action`: ops_rule_action_enum NULL
+- `account_id`: uuid NULL
+- `ip_hmac`: bytea NULL
+- `country_code`: char(2) NULL
+- `asn`: integer NULL
+- `user_agent_hmac`: bytea NULL
+- `request_id`: uuid NULL
+- `endpoint_key`: text NULL (Route template/handler key only; MUST NOT include resource IDs or query strings)
+- `http_status`: smallint NULL
+
+#### New Table: `ops_job_runs`
+
+- `id`: uuid pk
+- `job_name`: text NOT NULL
+- `status`: ops_job_status_enum NOT NULL DEFAULT 'running'
+- `started_at`: timestamptz NOT NULL DEFAULT now()
+- `finished_at`: timestamptz NULL
+- `error_summary`: text NULL
+- `rows_processed`: bigint NULL
+
+#### Updates to `profile_claims`
+
+- Add `last_seen_at` (timestamptz NULL)
+- Add `last_seen_country_code` (char(2) NULL)
+- Add `last_seen_asn` (integer NULL)
+- Add `last_seen_ip_hmac` (bytea NULL)
+- Add `last_seen_user_agent_hmac` (bytea NULL)
+
+#### Updates to `key_envelopes`
+
+- Add `created_by_account_id` (uuid NULL)
+- Add `revoked_by_account_id` (uuid NULL)
+
+#### Implementation Rules (Binding)
+
+1. **IP Storage:** Raw IP addresses must be ephemeral (edge/proxy logs only). Long-term storage uses `HMAC(server_secret, ip_address)` (stored as `bytea`). Same rule applies to User-Agent strings (`HMAC(server_secret, user_agent)`).
+2. **Retention:**
+   - `ops_security_events`: 90 days
+   - `ops_job_runs`: 90 days
+   - `ops_account_activity`: Lifetime of account
+   - `ops_geo_fence_rules`: Lifetime of configuration (until explicitly deleted)
+   - `ops_network_rules`: Lifetime while active; keep expired rules for 12 months after `expires_at`, then purge
+3. **Zero-Knowledge:** These tables MUST NOT store profile names, emails, raw IPs, request payloads, URLs containing IDs, or vault content (including any decrypted memory/profile metadata).
+
+---
+
+## 8. Security: Zero‑Knowledge Cryptography (Production Spec)
+
+### 8.1 Crypto Primitives **LOCKED**
+
+* Symmetric encryption: AES‑256‑GCM (Web Crypto)
+* Key derivation: Argon2id preferred or PBKDF2 fallback
+* Key wrapping/sharing:
+
+  * preferred: X25519 sealed box (libsodium.js) for envelopes
+  * fallback: ECDH + HKDF + AES‑GCM 
+
+### 8.2 Key Hierarchy **LOCKED**
+
+* **ARK**: derived from password/passkey secret + salt (client-only)
+* **AKMK**: random 32 bytes; stored server-side only as Encrypt(ARK, AKMK)
+* **Family ring keys**
+
+  * `K_family` shared with family members
+  * `K_inner` shared with inner circle via envelopes
+* **DEK per memory** encrypts blob bytes + metadata; wrapped into envelopes by privacy_level 
+
+### 8.3 Revocation Semantics **LOCKED**
+
+Revoking access prevents future decryption via envelope removal; it cannot erase what someone already copied while they had access. 
+
+### 8.4 Zero‑Knowledge Search (Blind Indexing) **LOCKED**
+
+Client computes:
+
+* normalize(term) → tokens
+* token = HMAC(K_search, normalized_term)
+  Server matches tokens without seeing plaintext. 
+
+---
+
+## 9. The 18‑Year Protocol (Transfer Ownership) — Production Enforcement
+
+This exists because the 18‑Year Lock is a business requirement. 
+Pitch requires: dormant until majority, then key rotation + custodian keys burned. 
+
+### 9.1 Custody Model **LOCKED**
+
+Introduce table `custody`:
+
+* `child_profile_id uuid pk fk profiles(id)`
+* `custodian_profile_id uuid fk profiles(id)`
+* `eligible_at timestamptz not null` (server-enforced time lock)
+* `status custody_status_enum not null` (active | transferred | revoked)
+* `created_at timestamptz` 
+
+How `eligible_at` is set: client computes from DOB (encrypted) at creation time; stored plaintext as operational gate. This is a product time lock, not a court-grade age oracle. 
+
+### 9.2 What “Burn Custodian Keys” Means **LOCKED**
+
+Custodians have access only because they possess custody key envelopes.
+“Burn” means remove/revoke custody-related envelopes that allow decryption beyond normal membership. 
+
+### 9.3 Transfer Execution (Client-side, Zero‑Knowledge) **LOCKED**
+
+When now ≥ eligible_at:
+
+* Child claims their profile.
+* Client generates new key material (new AKMK_child, new keypair).
+* Client rotates keys / rewraps DEKs as allowed.
+* Client requests server to mark custody transferred, revoke custodian envelopes, revoke custodian sessions/devices. 
+
+### 9.4 Post-transfer Invariants **LOCKED**
+
+* Custodian cannot regain privileged access unless the now-adult child explicitly shares keys.
+* Transfer is irreversible at the envelope layer (no server-held master key exists). 
+
+---
+
+## 10. Sovereign Ops (Self‑Hosting)
+
+### 10.1 No Cloud‑Only Dependency **LOCKED**
+
+System must run fully self-hosted. 
+
+### 10.2 Reference Deployment (docker compose)
+
+* reverse-proxy (Caddy/Nginx)
+* lore-web (Next.js)
+* lore-api
+* postgres
+* minio (ciphertext blobs)
+* optional: wireguard 
+
+### 10.3 Backups
+
+* Postgres: WAL archiving + periodic base backups
+* Object storage: bucket replication / snapshot strategy
+* Recommended: ZFS snapshot + replication for ransomware resilience 
+
+---
+
+## 11. Non‑Goals **LOCKED**
+
+* No free-pan infinite canvas.
+* No zoom gestures.
+* No new physics gestures beyond the FSM.
+* No server-side decryption “for convenience.” 
+
+---
+
+## 12. Production Readiness Checklist (v9.0 Gate) **LOCKED**
+
+* Physics constants versioned and tested on iOS Safari + Android Chrome + Desktop. 
+* Packet-sniff test proves: no plaintext content or keys leave device. 
+* Device/session inventory + revoke-all verified. 
+* Upload modal defaults to Private, validates date, shows encrypt/upload progress. 
+* Relationship rendering shows solid vs dotted based on schema. 
+* Transfer Ownership blocks before eligible_at, rotates keys at/after, revokes custodian sessions. 
+
+---
+
+# ARCHITECT’S NOTES (v9.0 Rationale & Merges)
+
+1. **Added “Registration & Key Setup” modal spec (Section 5.0).**
+   Draft v8.0 defines crypto primitives and Better Auth requirements but does not specify onboarding UX. The User Cases spreadsheet explicitly requires: a **No-Recovery acknowledgement**, password strength feedback, and a “Deriving Keys…” progress state. v9.0 binds these UX requirements while keeping the v8.0 crypto hierarchy and Better Auth model. 
+
+2. **Clarified solid vs dotted connector rendering with a truth table (Section 3.4).**
+   v8.0 states “Solid: verified biological” and “Dotted: oral/spiritual/chosen/step/unverified.” 
+   v9.0 turns that into an unambiguous boolean rule so engineering can implement and test deterministically.
+
+3. **Closed the “>2 parents” functional gap without breaking the 2‑generation render rule.**
+   v8.0 limits the rendered topology to two parents per lens, but does not define what happens if the database contains more. 
+   v9.0 adds an overflow strategy (“Other Parents” list) that preserves the constrained topology while supporting blended families in data.
+
+4. **Mapped the v6.0 tactile metaphors onto the v8.0 FSM names.**
+   The v6.0 “implosion,” “conveyor,” “rail slide,” “morph,” and “construction/birth” descriptions are now embedded directly inside the v8.0 state machine definitions, so engineering gets both the deterministic logic and the intended feel.   
+
+5. **Added an encrypted “Relationship label” field (optional) for semantic richness.**
+   The schema’s `relationship_kind` is intentionally minimal (biological vs chosen) to preserve plaintext minimization, while `evidence_state` captures verification posture. 
+   However, the product promise explicitly calls out fuzzy bonds (step, godparents, spiritual). 
+   v9.0 adds an **encrypted** label so the family can preserve meaning without leaking taxonomy to the server.
+
+6. **Resolved the “uploads default by context” conflict in favor of the business promise.**
+   The User Cases spreadsheet suggested context-based defaults, but v8.0 explicitly locks “Privacy default = Private” and ties it to the pitch. 
+   v9.0 preserves Private-by-default while enabling “Kiosk Fast Path” via prefilled defaults and collapsed advanced fields.

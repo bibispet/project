@@ -1,0 +1,954 @@
+## A) Patchset Summary
+
+Blueprint v1 is **patchable** (no full rebuild required) because its step structure, “thick client” posture, and most physics constraints already align with the Technical Appendix. The biggest risks are a handful of **high-impact omissions/contradictions** that will cause implementation drift: (1) a **wrong Lens Toggle order** in `docs/project_rules.md` vs the LOCKED Appendix spec, (2) a **missing Add Relative Modal step** (LOCKED §5.2) and its write-path endpoints, (3) the **Read Path Gap** (no explicit `ApiVaultRepo` adapter + memory download/decrypt path), and (4) **timeline ordering token ambiguity** (must be fractional indexing and must not encode dates). Patchset v1.1 below fixes these without rewriting the whole blueprint.
+
+---
+
+## B) Final Consolidated Fix List (v1.1)
+
+1. **Patch ID: BPv1.1-P01 — Project Rules Sync (Lens Toggle + Non-goals + SortKey + Ops redaction)**
+
+   * **Applies to:** Section 0 → `docs/project_rules.md`
+   * **What to change (exact text to add/remove):**
+
+     1. In `docs/project_rules.md`, replace the incorrect Lens Toggle bullet:
+        **Remove:**
+        `- Lens switching must be Unplug/Replug: retract old line → fade old node → fade new node → extend new line.` 
+        **Add:**
+        `- Lens switching must be Unplug/Replug (LOCKED §3.5): retract old line → fade old node → draw new connector → fade new node only after the new line reaches its target. No crossfade.`
+
+     2. Under “Absolute Non-Negotiables” add: 
+   	- `- No free-pan infinite canvas. No zoom gestures. Navigation is only via the FSM travel sequences.` 
+   	- `- One Test Harness: Use Vitest for unit/integration and Playwright for UI/e2e/manual scripts. Do not introduce Cypress.` 
+   	- `- Synthetic Fixtures Only: Fixtures must be synthetic (fake data); never commit real names/photos/DOB. Add a “PII scanner” gate for fixtures.` 
+   	- `- Auth Hard Constraint: Account authentication (Better Auth) must NOT use the Vault Password. The Vault Password is a local-only secret for ARK derivation.` 
+   	- `- Parallelism Allowed: S01 (Schema) can run in parallel with S03/S04 (UI); UI uses FixtureVaultRepo until ApiVaultRepo exists.` 
+
+     3. Under “Binding Names / Contracts” add:
+        `- timeline_sort_key is a fractional-indexing token (lexicographically sortable string). Never encode ISO dates / timestamps into timeline_sort_key.`
+     4. Under “Ledger / Logs” add:
+        `- Logs + ops tables must not store profile names, emails, request payloads, raw IPs, or URLs containing IDs. Use endpoint_key (route template) + request_id; store ip_hmac/user_agent_hmac only.`
+   * **Why (cite Appendix/override):**
+
+     * The correct lens toggle order is LOCKED in Appendix §3.5. 
+     * “No free-pan infinite canvas; no zoom” is explicit non-goal. 
+     * `timeline_sort_key` must be fractional indexing and must not reveal event date. 
+     * Ops/privacy redaction rules are binding (no raw IP, no URLs with IDs, etc.). 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: `docs/project_rules.md` passes an “Appendix sync” review: no contradictions vs LOCKED sections.
+     * Evidence: PR diff + a short “Doc Sync Checklist” comment linking the updated bullets; rerun Lens Toggle demo (S07) and confirm order visually.
+   * **Failure loop:**
+
+     * If doc contradictions remain: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Compare `docs/project_rules.md` against Technical Appendix v9.1 LOCKED sections (§1.3, §3.1, §3.5, §7.2, §7.3). List every contradiction and propose corrected wording that matches the Appendix exactly.”
+
+2. **Patch ID: BPv1.1-P02 — Timeline Ordering Token (Fractional Indexing) Implementation + Stop-the-line Gate**
+
+   * **Applies to:** Steps S01, S14, S16, S19 (and any code that writes/queries `memories.timeline_sort_key`)
+   * **What to change (exact text to add/remove):**
+
+     1. Add an explicit utility + tests:
+
+        * Add file: `apps/web/src/lib/timelineSortKey.ts` implementing **fractional indexing** with API:
+
+          * `between(prev: string | null, next: string | null): string`
+          * `after(last: string | null): string`
+        * Add tests: `apps/web/src/lib/timelineSortKey.test.ts`
+     2. Patch Step S19 to require:
+        `timeline_sort_key MUST be produced by timelineSortKey.* and MUST NOT encode event date.`
+     3. Patch Step S16 to require:
+        `All timeline queries order by timeline_sort_key (server) and never by decrypted event date.`
+     4. Add CI “stop-the-line” guard:
+
+        * Script: `pnpm timelineSortKey:lint` that fails if any `timeline_sort_key` resembles `YYYY-MM-DD` or ISO strings (regex scan on fixtures/tests and on any code that formats sort keys).
+
+     5. Add allowlist format + collision safety rules (stop-the-line):
+
+   	- Allowlist format: timeline_sort_key MUST be base64url (chars [A–Z a–z 0–9 _ -] only), min length 8, no '=' padding. 
+   	- Collision strategy: if a generated key equals prev/next OR already exists (DB unique violation), re-generate with extra precision (or deterministic extension) and retry. 
+   	- Add DB uniqueness rule (preferred): UNIQUE(family_id, timeline_sort_key). If schema changes are out-of-scope, enforce “retry-on-conflict” in the write path and add an integration test proving it. 
+   	- Extend `pnpm timelineSortKey:lint`: 
+     		- Enforce allowlist charset + min length 
+     		- Continue rejecting date-like patterns (YYYY-MM-DD / ISO)
+
+   * **Why (cite Appendix/override):**
+
+     * `timeline_sort_key` is a **fractional indexing token** and “reveals ordering but not event date.” 
+     * The client is responsible for timeline ordering (thick client doctrine). 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: Unit tests prove insertion between tokens; tokens remain lexicographically sortable and not date-like.
+     * Gate: Integration test seeds 3 memories with out-of-order event dates; client assigns sort keys so server ordering matches decrypted chronological order.
+     * Evidence: test output + a DB query screenshot showing `ORDER BY timeline_sort_key` matches UI order.
+   * **Failure loop:**
+
+     * If chronological ordering breaks after inserts: **Pivot tool:** Cursor (or GPT-5.2 Pro)
+       **Prompt:**
+
+       > “Given this fractional-indexing implementation and a list of (memoryId, eventDate, existingSortKey), generate the correct algorithm to choose prev/next neighbors for a new memory inserted by eventDate, minimizing fetches, and keeping server ordering consistent with decrypted chronology.”
+
+3. **Patch ID: BPv1.1-P03 — VaultRepo Contract Lock + UI/API Separation Enforcement**
+
+   * **Applies to:** Step S14 (global), Step S17R (new), Step S16 (API shapes)
+   * **What to change (exact text to add/remove):**
+
+     1. In Step S14, add an explicit “VaultRepo Contract (Binding)” block that defines:
+
+        * The exact methods UI may call (read + write) and the **decrypted** return shapes.
+        * A hard rule: “UI must not import API clients directly; only VaultRepo.”
+     2. Add lint rule: `no-restricted-imports` (or equivalent) to forbid importing `/src/api/*` from `/src/ui/*` except through `vaultRepo.ts`.
+     3. Add `repoContract.test.ts` ensuring: FixtureVaultRepo and ApiVaultRepo return identical shapes for the same seeded dataset (ignoring IDs that differ).
+   * **Why (cite Appendix/override):**
+
+     * Thick client responsibilities: encrypt/decrypt + ordering happen client-side; UI should not manipulate ciphertext directly. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: Lint fails if UI imports API client.
+     * Gate: `repoContract.test.ts` passes for both repos.
+     * Evidence: CI log showing import ban works (include a deliberately failing example in test branch once).
+   * **Failure loop:**
+
+     * If devs bypass repo: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Design an ESLint + TS path strategy that enforces ‘UI imports only VaultRepo’ in a Next.js monorepo, including examples of allowed/blocked imports and how to keep test utilities unblocked.”
+
+4. **Patch ID: BPv1.1-P04 — Add Missing Step: Add Relative Modal (LOCKED §5.2) + Relationship Label Handling**
+
+   * **Applies to:** New Step S14A (insert after S14), plus Step S13 (entrypoint in Edit Mode), Step S16 (write endpoints)
+   * **What to change (exact text to add/remove):**
+
+     1. Insert a new step after S14:
+
+        * `### Step S14A — Add Relative Modal (LOCKED §5.2) + Graph Mutation Wiring`
+     2. Update “UI Mechanics Coverage Map” to include Add Relative Modal row (Edit Mode).
+     3. Add `VaultRepo.addRelative()` (or `createProfile()` + `createRelationship()`) to the contract, implemented in FixtureVaultRepo first.
+     4. Add explicit rule for relationship labels:
+
+        * Relationship label must be encrypted (never plaintext).
+  - NOTE (Appendix-allowed plaintext): relationships.relationship_kind and relationships.evidence_state remain plaintext for deterministic rendering/topology.
+  - No other meaning fields may exist in plaintext relationship rows (no names, DOB, notes, labels, etc.).
+
+   * **Why (cite Appendix/override):**
+
+     * Add Relative Modal requirements (fields, validation, spouse/partner requirement) are LOCKED. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: AddRelativeModal matches required fields + validation rules, including DOB consistency check.
+     * Gate: Save creates profile + relationship, and no plaintext profile fields are sent over network.
+     * Evidence: e2e script recording + packet sniff confirming ciphertext-only.
+   * **Failure loop:**
+
+     * If modal violates required fields/validation: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Implement the Add Relative Modal exactly per Appendix §5.2: list required UI fields, validation rules, and the minimum write APIs needed. Then propose a VaultRepo method signature and a fixture implementation.”
+
+5. **Patch ID: BPv1.1-P05 — Graph Write APIs + MVP Membership Enforcement Default**
+
+   * **Applies to:** Step S16
+   * **What to change (exact text to add/remove):**
+     Add to Step S16 “Prompt/Action” the **write-path endpoints** needed by AddRelativeModal:
+
+     * `POST /profiles` (ciphertext-only)
+     * `PATCH /profiles/:id/blob` (ciphertext-only updates)
+     * `POST /relationships` (plaintext allowed fields ONLY: topology/render per Appendix; includes relationship_kind + evidence_state; excludes labels/names/notes/DOB)
+     * `PATCH /relationships/:id/slotHint` (updates `slot_hint`)
+       Add to Step S16 “AuthZ rule (MVP default)”:
+     * `family_id` is derived from the account’s claimed profile (single-family-per-account default for MVP).
+   * **Why (cite Appendix/override):**
+
+     * Server must not receive decrypted meaning; client handles encryption/decryption. 
+     * Identity model includes membership and profile_claim; membership association details are not fully specified, so MVP default must be stated. 
+     * Blueprint itself notes this gap and recommends single-family-per-account for MVP. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: unauthorized cross-family write attempts are rejected.
+     * Gate: request bodies contain no plaintext profile fields; only encrypted blobs and allowed plaintext fields.
+     * Evidence: API tests + packet sniff screenshots.
+   * **Failure loop:**
+
+     * If cross-family writes pass: **Pivot tool:** Cursor
+       **Prompt:**
+
+       > “Add an authorization layer that derives family_id from profile_claims for the session account, then validates all profile/relationship/memory operations are within that family_id. Show code changes + tests.”
+
+6. **Patch ID: BPv1.1-P06 — Close Read Path Gap: ApiVaultRepo Adapter + Memory Download/Decrypt Path**
+
+   * **Applies to:** New Step S17R (insert after S17), plus Steps S14/S16/S19
+   * **What to change (exact text to add/remove):**
+
+     1. Insert a new step after S17:
+
+        * `### Step S17R — ApiVaultRepo Adapter (Read Path Closure) + Decrypt-on-Client`
+     2. Ensure Step S16 includes read endpoints sufficient for ApiVaultRepo: encrypted profile blobs, relationship edges, memory index, key envelopes.
+     3. Add explicit “Memory Read Path” endpoint(s):
+
+        * `GET /memories/:id/downloadUrl` → presigned download URL
+4. Add repo seam toggle: `VAULT_REPO_MODE=fixture|api` and a smoke test that exercises both.
+
+   Production fail-safe (stop-the-line):
+   - Default mode: `api` in production builds.
+   - `fixture` mode is permitted ONLY when `NODE_ENV !== 'production'`.
+   - Add a build-time assertion: production bundle must contain NO FixtureVaultRepo imports (fail CI if detected).   
+
+* **Why (cite Appendix/override):**
+
+     * Thick client must decrypt; server must not. 
+     * Fetch-memory read path is explicitly defined (guard authorize → presigned download URL → client decrypt). 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: Timeline can render real DB data by switching to ApiVaultRepo **before Launch**.
+     * Gate: No decrypted vault content appears in server logs while browsing.
+     * Evidence: e2e test + log scan results.
+   * **Failure loop:**
+
+     * If decrypt fails or UI still uses fixtures: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Given a VaultRepo contract and API endpoints that return encrypted blobs + key envelopes, implement ApiVaultRepo that fetches ciphertext and decrypts in a WebWorker, returning UI-ready objects. Include a minimal integration test that seeds encrypted rows and verifies UI text renders.”
+
+7. **Patch ID: BPv1.1-P07 — Keychain + Account Keypair + K_search Derivation Clarified**
+
+   * **Applies to:** Steps S17, S18, S20, S21 (and S23 if transfer implemented)
+   * **What to change (exact text to add/remove):**
+
+     1. Add to Step S17 a “Keychain (Binding)” subsection specifying:
+
+        * X25519 keypair generation and sealed box operations are implemented in the worker.
+        * Where account public keys live server-side, and how clients fetch them for envelope wrapping.
+        * How `K_search` is derived from `AKMK` (HKDF) and never stored plaintext.
+     2. Add to Step S18 “Prompt/Action”:
+
+        * Generate account X25519 keypair at registration.
+        * Upload public key to server; store private key encrypted under AKMK (as part of encrypted keychain blob).
+     3. Patch Step S21 to explicitly reference Keychain as the source of `K_search`.
+   * **Why (cite Appendix/override):**
+
+     * Crypto primitives: AES-GCM, X25519 sealed box, Argon2id. 
+     * Key material must be encrypted; server stores ciphertext only. 
+     * Key hierarchy includes K_search and envelopes. 
+     * Blind indexing requires HMAC tokens derived from K_search; plaintext terms must never be sent. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: sealed box roundtrip test passes (wrap/unwrap).
+     * Gate: packet sniff confirms private keys never leave unencrypted.
+     * Evidence: unit tests + packet capture notes.
+   * **Failure loop:**
+
+     * If envelope unwrapping fails: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Diagnose why X25519 sealed box unwrap is failing in this codebase. Given worker message logs + a sample recipient public key + wrapped_key, identify which of (key encoding, libsodium init, base64, wrong keypair) is the likely cause and propose fixes with tests.”
+
+8. **Patch ID: BPv1.1-P08 — Secure Upload: Placement → zone_anchor mapping + zone_focus_profile_id + object_key hygiene**
+
+   * **Applies to:** Step S19 (and S16 memory APIs)
+   * **What to change (exact text to add/remove):**
+
+     1. In Step S19 Prompt/Action, explicitly list Placement as required and map it:
+
+	* Timeline (Origins) → `zone_anchor = origins`
+	* Timeline (Legacy) → `zone_anchor = legacy`
+	* Vault Only → `zone_anchor = vault_only`
+     2. Require `zone_focus_profile_id = current focus profile` at creation.
+     3. Require `timeline_sort_key` generated per Patch P02.
+     4. Add rule: `object_key` must be random/UUID-based (no filename, no user meaning).
+   * **Why (cite Appendix/override):**
+
+     * Secure Upload Modal requires Placement. 
+     * Memories schema requires `zone_anchor` and `zone_focus_profile_id`. 
+     * Timeline ordering token rules. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: DB rows for new memory always have zone fields + non-date-like sort keys.
+     * Evidence: SQL query output + UI shows correct placement behavior.
+   * **Failure loop:**
+
+     * If placement drifts (timeline/vault mismatch): **Pivot tool:** Cursor
+       **Prompt:**
+
+       > “Add an explicit mapping layer from UploadModal(placement) → DB(memor ies.zone_anchor, zone_focus_profile_id), and add an integration test that verifies the correct zone values for each placement option.”
+
+9. **Patch ID: BPv1.1-P09 — Logging Hardening: endpoint_key only; no raw URL/IP; redaction enforced by tests**
+
+   * **Applies to:** Step S15 (and all server middleware)
+   * **What to change (exact text to add/remove):**
+
+     * Replace S15 logging guidance with an explicit allowlist logger:
+
+       * Only log: `request_id`, `endpoint_key` (route template), `status`, `latency_ms`, `account_id` (optional), `family_id` (optional).
+       * Never log: raw URL path params, request payloads, emails, names, raw IPs, user agent strings.
+     * Add `server/logSanitizer.ts` + `logSanitizer.test.ts`.
+
+- endpoint_key definition (binding):
+  - endpoint_key MUST be derived from the router’s route template (e.g., `/profiles/:id/blob`).
+  - endpoint_key MUST NOT be derived from the raw request path (`req.originalUrl`, `req.path`) and must never include IDs.
+
+   * **Why (cite Appendix/override):**
+
+     * Ops addendum “must not store names/emails/raw IP/URLs containing IDs/payloads”; raw IP must be ephemeral and stored only as HMAC in ops tables. 
+   * **New/updated gate(s) + evidence required:**
+
+     * Gate: unit test fails if log payload contains forbidden keys or patterns (email regex, UUID-in-URL, etc.).
+     * Evidence: CI test output + manual grep of logs after typical flows.
+   * **Failure loop:**
+
+     * If forbidden data appears in logs: **Pivot tool:** GPT-5.2 Pro
+       **Prompt:**
+
+       > “Given these sample log lines, identify which middleware/logger call site is emitting forbidden data, and propose a centralized redaction strategy that prevents recurrence, including a unit test suite.”
+
+10. **Patch ID: BPv1.1-P10 — Ops Metadata Addendum Enforcement (HMAC, endpoint_key, XOR constraint, retention jobs)**
+
+* **Applies to:** Step S24
+* **What to change (exact text to add/remove):**
+
+  * Add an explicit `opsMiddleware` spec and implementation notes:
+
+    * Compute `ip_hmac = HMAC(server_secret, ip_address)` and store as `bytea`; same for `user_agent_hmac`.
+    * Store `endpoint_key` (route template), not full URL.
+    	- endpoint_key MUST come from the router’s route template (e.g., `/memories/:id/downloadUrl`), never raw URLs/paths.
+    * Implement retention jobs for ops tables.
+    * Enforce `ops_network_rules` XOR constraint and test it.
+* **Why (cite Appendix/override):**
+
+  * Addendum tables/columns are binding. 
+  * Implementation rules are binding.  
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: migration applies + constraints verified by tests.
+  * Evidence: `ops_network_rules` rejects invalid rows; ops event inserts contain only hashed IP/UA.
+* **Failure loop:**
+
+  * If ops rows store forbidden data: **Pivot tool:** Cursor
+    **Prompt:**
+
+    > “Implement opsMiddleware that records only endpoint_key + ip_hmac + user_agent_hmac per Appendix 7.3, and add tests that fail if raw IP/user-agent/full URL is persisted.”
+
+11. **Patch ID: BPv1.1-P11 — Viewport Stability: Safe-area + Meta viewport + measurable jitter budget**
+
+* **Applies to:** Step S03
+* **What to change (exact text to add/remove):**
+
+  * Add meta tag requirement: `viewport-fit=cover`.
+  * Add safe-area padding on root surface using `env(safe-area-inset-*)`.
+  * Add a jitter sampling method and threshold (e.g., “no height changes > 1px when idle for 2s after keyboard close”).
+* **Why (cite Appendix/override):**
+
+  * NOT SPECIFIED IN DOCS for safe-area specifics; Sovereign-aligned default to meet “tested on iOS Safari” readiness expectation. 
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: viewport stability script passes on iOS Safari + Android Chrome; screenshots captured.
+* **Failure loop:**
+
+  * If jitter persists: **Pivot tool:** GPT-5.2 Pro
+    **Prompt:**
+
+    > “Given this viewport hook implementation and iOS Safari behavior, propose a stabilized dvh/svh/visualViewport strategy that prevents post-keyboard ‘bounce’ without breaking layout.”
+
+12. **Patch ID: BPv1.1-P12 — Pointer Safety: Global touch-action + overscroll disable + pointercancel recovery**
+
+* **Applies to:** Step S04
+* **What to change (exact text to add/remove):**
+
+  * Add explicit CSS and event handling requirements:
+
+    * `touch-action: none` on the Surface root; `overscroll-behavior: none`; disable native scrolling.
+    * Ignore non-primary pointers.
+    * `pointercancel` triggers immediate snapback and state reset.
+* **Why (cite Appendix/override):**
+
+  * No native scroll physics. 
+  * Pointer safety requirements (ignore multi-touch, handle pointercancel). 
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: automated pointercancel test (simulate cancel) returns to stable state, and no scroll occurs.
+* **Failure loop:**
+
+  * If iOS still scrolls / rubber-bands: **Pivot tool:** Cursor
+    **Prompt:**
+
+    > “Add the minimal CSS + JS changes to guarantee no native scroll and robust pointercancel recovery on iOS Safari, while keeping 1:1 drag deltas.”
+
+13. **Patch ID: BPv1.1-P13 — Automated Ledger + Payload Lint (“Stop-the-line”)**
+
+* **Applies to:** Steps S00, S01, S15, S16, S19, S24
+* **What to change (exact text to add/remove):**
+
+  * Add CI scripts:
+
+    * `pnpm ledger:check` → fails if any API response field is not classified in `docs/ledger_field_matrix.md` or violates “ciphertext-only” rules.
+    * `pnpm payload:lint` → scans server logs/test output for banned patterns (emails, UUID-in-URL, “password=”, decrypted strings).
+  * Add explicit rule: “Any gate failure is stop-the-line; no further steps proceed.”
+* **Why (cite Appendix/override):**
+
+  * Security ledger rules are binding and explicitly call for guarding plaintext leakage and minimizing metadata. 
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: ledger:check and payload:lint run in CI and locally; include a “known-bad” fixture to prove the gate catches violations.
+* **Failure loop:**
+
+  * If ledger gate trips: **Pivot tool:** GPT-5.2 Pro
+    **Prompt:**
+
+    > “Given this failing ledger:check output (fields X/Y/Z), classify each field per Appendix 2.1–2.3, propose schema/response changes to comply, and update docs/ledger_field_matrix.md accordingly.”
+
+14. **Patch ID: BPv1.1-P14 — Devtools / Harness Containment (No prod leakage, no sprawl)**
+
+* **Applies to:** Global + Steps S03/S06/S17 (debug overlay, perf harness)
+* **What to change (exact text to add/remove):**
+
+  * Create `/apps/web/src/devtools/` and require all harness entrypoints to be:
+
+    * (a) excluded from production build or
+    * (b) gated behind `NODE_ENV !== 'production'` and `?dev=1`.
+  * Add a prod build check: devtools routes/components are not reachable.
+* **Why:**
+
+  * NOT SPECIFIED IN DOCS; Sovereign-aligned default to prevent accidental leakage of debug surfaces and drift via ad-hoc harnesses.
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: `next build` + a smoke test confirms devtools are absent in production output.
+* **Failure loop:**
+
+  * If devtools bundle into prod: **Pivot tool:** Cursor
+    **Prompt:**
+
+    > “Refactor these devtools imports so they are tree-shaken or conditionally imported, and add a build-time assertion that devtools code is excluded from production bundles.”
+
+15. **Patch ID: BPv1.1-P15 — Connector Geometry + “No extra lines” Drift Lock**
+
+* **Applies to:** Steps S05, S06
+* **What to change (exact text to add/remove):**
+
+  * Add a “Golden Connector Invariants” test suite:
+
+    * Asserts `ConnectorLayer` draws connectors only for **core nodes** (focus/label/parents and FSM spouse/child when present), never for memories or UI buttons.
+    * Asserts anchor math and bezier control points remain stable across 3 canonical viewport sizes.
+  * Add a “path count” snapshot for baseline states (idle Origins, idle Legacy, lens toggle frame).
+* **Why (cite Appendix/override):**
+
+  * Architect override: “Only the core nodes get lines.” 
+  * Two-generation rendering window and deterministic constraints are core to topology stability. 
+* **New/updated gate(s) + evidence required:**
+
+  * Gate: connector snapshot tests pass; any connector additions force an explicit spec bump.
+* **Failure loop:**
+
+  * If connector tests fail after refactor: **Pivot tool:** GPT-5.2 Pro
+    **Prompt:**
+
+    > “Given failing connector golden tests and the new DOM layout, compute the expected anchor points and propose a corrected connector path generation that matches the override geometry rules.”
+
+---
+
+## C) Step Patch Blocks (Copy/Paste)
+
+Below are clean replacement blocks for the **Objective / Prompt/Action / Quality Gate / Failure Loop** of each affected step, plus two new steps (S14A, S17R). Paste these blocks into Blueprint v1 in-place.
+
+### Step S00 — Repo Scaffolding & Guardrails (Patched)
+
+```md
+Objective:
+- Stand up the monorepo with guardrails that prevent (a) plaintext leakage, (b) UI↔API coupling drift, and (c) debug harness sprawl reaching production.
+
+Prompt/Action:
+- Add CI scripts:
+  - `pnpm ledger:check` (fails if API fields/logs violate ledger)
+  - `pnpm payload:lint` (fails on banned patterns: emails, UUID-in-URL logs, "password=", decrypted strings)
+  - `pnpm timelineSortKey:lint` (fails if timeline_sort_key resembles ISO dates)
+  - `pnpm prod:no-fixtures` (fails if FixtureVaultRepo is reachable/imported in production build output)
+- Add lint rule(s) to enforce: UI imports only `VaultRepo` (no direct API client imports from UI layer).
+- Create `/apps/web/src/devtools/` and enforce dev-only gating (`NODE_ENV !== 'production'` AND `?dev=1`), with a production build check that devtools do not ship.
+
+Quality Gate:
+- `pnpm lint && pnpm test && pnpm ledger:check && pnpm payload:lint` all pass.
+- `pnpm prod:no-fixtures` passes (proves fixtures cannot ship in production).
+- A deliberate “known-bad” test case proves the gates fail when forbidden log patterns or unclassified plaintext fields are introduced.
+- Production build smoke test confirms devtools are not reachable.
+
+Failure Loop:
+- If ledger/payload gates fail:
+  - Identify the violating field/log source.
+  - Fix by either (a) moving meaning into ciphertext blobs, (b) redacting logs, or (c) updating ledger docs if explicitly allowed.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Given this ledger/payload failure output, propose the minimal compliant fix and update docs/ledger_field_matrix.md."
+```
+
+### Step S01 — Data Contracts, Schema Lock, Ledger Matrix (Patched)
+
+```md
+Objective:
+- Lock schema + enum contracts AND add automated drift enforcement for:
+  - timeline_sort_key (fractional indexing token; must not encode dates),
+  - API payload field classification (ledger),
+  - logs/ops metadata redaction.
+
+Prompt/Action:
+- Add `docs/timeline_sort_key.md` with:
+  - Allowlist format: base64url chars only, min length 8, no '=' padding.
+  - Collision rule: duplicates are disallowed; must retry generation on conflict (or enforced by UNIQUE(family_id, timeline_sort_key)).
+  - Definition: fractional indexing token (lexicographically sortable string).
+  - Hard rule: never encode event date/time into the token.
+  - Invariants + examples.
+- Add unit tests for timelineSortKey utility (added in S14).
+- Extend schema validation tooling:
+  - Confirm required columns exist per Appendix schema contract.
+  - Confirm enums match.
+  - Confirm ops addendum tables exist once S24 lands.
+- Implement `ledger:check` to validate all API response schemas are ledger-compliant.
+
+Quality Gate:
+- Schema + enum tests pass.
+- `ledger:check` passes.
+- `timelineSortKey:lint` passes and unit tests prove insertion between tokens.
+
+Failure Loop:
+- If schema drift occurs:
+  - Fix migration/enum mismatch and rerun tests.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Diff current schema vs Appendix 7.1/7.3 and output the exact migration + enum changes needed."
+```
+
+### Step S03 — Viewport Stability Harness (Override F) (Patched)
+
+```md
+Objective:
+- Guarantee a stable, non-scrolling viewport with no jitter after keyboard open/close across iOS Safari + Android Chrome.
+
+Prompt/Action:
+- Add meta viewport requirement: `viewport-fit=cover`.
+- Add safe-area padding on the root Surface: use `env(safe-area-inset-*)`.
+- Maintain the stable viewport hook (visualViewport-based) and log:
+  - resize reason
+  - delta px
+  - timestamp
+- Define an explicit jitter budget measurement:
+  - "After keyboard closes, Surface height must stabilize within 1px within 500ms; no subsequent idle changes > 1px for 2s."
+
+Quality Gate:
+- Manual run on iOS Safari + Android Chrome:
+  - No scrollbars ever.
+  - Height stability meets the jitter budget above after keyboard close.
+- A short capture (screen recording or logged trace) is attached to the PR.
+
+Failure Loop:
+- If jitter persists:
+  - Record traces with timestamps and height deltas.
+  - Try alternate dvh/svh strategy + visualViewport throttling.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Given these viewport traces and current hook code, propose a stabilized strategy that eliminates post-keyboard bounce."
+```
+
+### Step S04 — Pointer Pipeline & Drag Harness (Patched)
+
+```md
+Objective:
+- Ensure touch input is fully deterministic: 1:1 deltas, no native scroll/rubber-band, safe recovery on pointercancel, and multi-touch ignored.
+
+Prompt/Action:
+- Enforce global CSS on Surface root:
+  - `touch-action: none; overscroll-behavior: none; overflow: hidden;`
+- Enforce event policy:
+  - Ignore non-primary pointers.
+  - Always call `setPointerCapture` on pointerdown.
+  - On pointercancel: immediate snapback animation + reset FSM state.
+- Add an automated pointercancel test (synthetic) plus manual multi-touch test instructions.
+
+Quality Gate:
+- Multi-touch does not move the scene.
+- pointercancel returns to a stable state (no stuck dragging) within a single snapback animation.
+- No native scroll/rubber band is observed during drag.
+
+Failure Loop:
+- If iOS rubber-bands or cancel sticks:
+  - Confirm touch-action is applied on the correct element.
+  - Confirm pointer capture and cancel handler are wired.
+  - Pivot tool: Cursor
+  - Prompt: "Patch CSS + event handling to prevent iOS rubber-band and guarantee pointercancel recovery; include a test."
+```
+
+### Step S14 — Data Model + Placement Rules + VaultRepo Contract (Patched)
+
+```md
+Objective:
+- Define deterministic, testable selection/placement rules AND lock the VaultRepo seam (FixtureVaultRepo → ApiVaultRepo) so UI never depends on DB/API shape drift.
+- Implement the timeline_sort_key generator as a fractional indexing token utility.
+
+Prompt/Action:
+- Implement `timelineSortKey.ts` + tests:
+  - Must enforce allowlist format: base64url chars only, min length 8, no '=' padding.
+  - Must be collision-safe: if key equals neighbor or duplicates an existing key, re-generate and retry (and/or rely on UNIQUE(family_id, timeline_sort_key)).
+  - Must generate lexicographically sortable tokens.
+  - Must support insertion between prev/next.
+  - Must NOT encode dates.
+- Add "VaultRepo Contract (Binding)" defining:
+  - Read methods: getFocusSlice, listMemoriesIndex, getMemoryDownloadAndDecrypt (or equivalent)
+  - Write methods: addRelative/createProfile/createRelationship, createMemory (upload), updateAccessControls (envelopes)
+  - Return types are always decrypted UI-ready objects.
+- Add an import barrier so UI cannot import API client directly.
+- Update FixtureVaultRepo to satisfy the full contract (even if some methods are stubbed initially).
+
+Quality Gate:
+- timelineSortKey unit tests pass.
+- repoContract tests pass (FixtureVaultRepo conforms).
+- Lint blocks direct API imports from UI.
+
+Failure Loop:
+- If repo seam drifts:
+  - Consolidate logic into VaultRepo and re-run contract tests.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Given current UI imports and repo interface, refactor to enforce a single VaultRepo seam with minimal churn."
+```
+
+### Step S14A — Add Relative Modal (LOCKED §5.2) + Graph Mutation Wiring (NEW)
+
+```md
+Dependencies:
+- S13 (Edit Mode entrypoints exist)
+- S14 (VaultRepo seam + selection functions exist)
+
+Objective:
+- Implement Add Relative Modal exactly per Appendix §5.2:
+  - Required fields, validation rules, and save behavior.
+- Wire it through VaultRepo so UI can run on fixtures first, then API.
+
+Prompt/Action:
+- Build AddRelativeModal (Edit Mode only, attaches from focus node only).
+- Fields (per Appendix):
+  - Relationship Type: Parent / Child / Spouse/Partner
+  - Name (required), DOB (optional), Ghost profile toggle
+  - Relationship Kind: biological / chosen (required)
+  - Evidence State: verified / oral_tradition / unverified (required)
+  - Relationship Label (optional; encrypted-only)
+  - Slot Preference: left/right/auto (maps to slot_hint)
+- Validation:
+  - If DOB known for both parent + child: parent DOB must be earlier.
+- Save:
+  - Create profile (ciphertext blob) if needed.
+  - Create relationship edge (plaintext allowed fields ONLY per Appendix: topology + relationship_kind + evidence_state + slot_hint; no labels/names/notes/DOB).
+  - Update encrypted relationship label storage (encrypted in profile blob or relationship meta blob).
+- Implement via `vaultRepo.addRelative()` with an optimistic UI update and rollback on failure.
+
+Quality Gate:
+- Manual script:
+  - Add parent, add child, add spouse/partner flow works.
+  - DOB rule enforced.
+  - No plaintext profile fields observed in network requests.
+- Tests:
+  - Unit: validation rules.
+  - Integration: writes create rows in DB with no plaintext meaning fields beyond Appendix-allowed relationship fields (topology + relationship_kind + evidence_state + slot_hint).
+
+Failure Loop:
+- If save path leaks plaintext:
+  - Move meaning into encrypted blob fields; keep only allowed plaintext metadata.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Rewrite the AddRelativeModal save payloads to be ciphertext-only for meaning fields while preserving allowed plaintext metadata."
+```
+
+### Step S15 — Logging Discipline + Metadata Hygiene (Patched)
+
+```md
+Objective:
+- Enforce zero-meaning logs and metadata discipline across the entire server:
+  - endpoint_key + request_id only in logs,
+  - no raw IPs/user agents/URLs with IDs,
+  - ops tables store only HMACs and route templates.
+
+Prompt/Action:
+- Implement a strict allowlist logger:
+  - Allowed fields: request_id, endpoint_key (route template), status, latency_ms, account_id (optional), family_id (optional).
+  - Disallowed: emails, profile names, request bodies, raw IP, raw UA, full URLs/paths containing IDs.
+- endpoint_key binding:
+  - Compute endpoint_key from the router’s route template (e.g., `/profiles/:id/blob`).
+  - Never compute endpoint_key from `req.originalUrl` / raw paths (must not contain IDs).
+- Add `logSanitizer` + tests:
+  - Regex blocklist: email patterns, UUID-in-URL patterns, "password=" patterns.
+- Ensure error handlers do not dump request objects.
+
+Quality Gate:
+- Unit tests prove sanitizer blocks forbidden payloads.
+- Manual log grep after user flows finds no forbidden patterns.
+
+Failure Loop:
+- If forbidden data appears:
+  - Identify the emitter (middleware/route).
+  - Move sensitive values to redacted/hmac’d fields or remove entirely.
+  - Pivot tool: Cursor
+  - Prompt: "Locate and remove the log emission of forbidden data; replace with endpoint_key + request_id."
+```
+
+### Step S16 — Graph Slice APIs (Read + Write) (Patched)
+
+```md
+Objective:
+- Provide the minimal API surface to support:
+  - ApiVaultRepo read path (ciphertext in, decrypt on client),
+  - AddRelativeModal write path,
+  - timeline memory index paging by timeline_sort_key.
+
+Prompt/Action:
+- Read endpoints (ciphertext-only meaning):
+  - FocusSlice: encrypted profile blobs + relationships + memory index
+  - Key envelopes listing for needed items
+- Write endpoints:
+  - POST /profiles (encrypted_profile_blob only for meaning)
+  - PATCH /profiles/:id/blob (ciphertext update only)
+  - POST /relationships (plaintext allowlist only: from_profile_id, to_profile_id, edge_type, relationship_kind, evidence_state, slot_hint, timestamps; no labels/names/notes/DOB)
+  - PATCH /relationships/:id/slotHint
+- Memory read path endpoint:
+  - GET /memories/:id/downloadUrl → presigned download URL
+- AuthZ MVP default:
+  - Derive family_id from profile_claim for the session account (single-family-per-account).
+  - Reject cross-family operations.
+
+Quality Gate:
+- Contract tests ensure:
+  - Server never returns decrypted meaning.
+  - All responses are ledger-compliant.
+  - timeline ordering uses timeline_sort_key only.
+- Negative tests prove cross-family access is blocked.
+
+Failure Loop:
+- If plaintext meaning appears in responses:
+  - Remove it from server payload; return ciphertext only.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Given this API response schema, rewrite it to comply with the ledger (ciphertext-only for meaning) and update any clients."
+```
+
+### Step S17 — Crypto Worker + Keychain (Patched)
+
+```md
+Objective:
+- Provide a non-blocking crypto module that supports:
+  - encryption/decryption of blobs,
+  - sealed box key envelopes,
+  - keychain encryption under AKMK,
+  - K_search derivation for blind indexing.
+
+Prompt/Action:
+- Add worker ops:
+  - AES-GCM encrypt/decrypt (Uint8Array)
+  - X25519 sealed box encrypt/decrypt
+  - Argon2id KDF (PBKDF2 fallback)
+  - HKDF derivations: K_search from AKMK
+- Define Keychain format (encrypted blob) containing:
+  - account private key (encrypted under AKMK)
+  - K_search (derived on demand; not stored plaintext)
+  - any cached unwrapped ring keys (in-memory only)
+- Provide a dev/test-only keychain fixture for integration tests (must not ship in prod; gated by P14).
+
+Quality Gate:
+- Crypto unit tests:
+  - sealed box wrap/unwrap roundtrip
+  - AES-GCM roundtrip
+  - keychain encrypt/decrypt
+- Perf harness shows no frame drops during drag while crypto runs in worker.
+
+Failure Loop:
+- If UI janks:
+  - Move heavy work into worker, reduce main-thread JSON parsing, batch messages.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Profile this crypto pipeline; propose worker batching and message protocols to remove main-thread stalls."
+```
+
+### Step S17R — ApiVaultRepo Adapter + Read Path Closure (NEW)
+
+```md
+Dependencies:
+- S14 (VaultRepo contract)
+- S16 (ciphertext APIs)
+- S17 (crypto worker + keychain)
+
+Objective:
+- Implement ApiVaultRepo so the Timeline can switch from fixtures to real API data (ciphertext) and decrypt client-side before launch.
+
+Prompt/Action:
+- Implement ApiVaultRepo:
+  - Fetch focus slice ciphertext via API.
+  - Fetch needed key envelopes.
+  - Unwrap DEKs client-side via keychain + worker.
+  - Decrypt profile blobs + memory metadata blobs into UI-ready objects.
+- Implement memory read:
+  - Call /memories/:id/downloadUrl
+  - Download ciphertext bytes
+  - Decrypt client-side and render media.
+- Add a toggle:
+  - `VAULT_REPO_MODE=fixture|api`
+  - Optional dev UI switch (dev-only).
+- Production fail-safe:
+  - In production builds, default to `api`.
+  - Forbid `fixture` when `NODE_ENV === 'production'` (hard error).
+  - Add a build-time assertion: production bundle contains NO FixtureVaultRepo imports.
+
+Quality Gate:
+- With `VAULT_REPO_MODE=api`, Timeline renders real DB-seeded encrypted data.
+- Packet sniff confirms server never receives vault plaintext and never returns decrypted meaning.
+
+Failure Loop:
+- If decrypted UI is empty/garbled:
+  - Confirm key envelope selection and unwrap logic.
+  - Confirm blob versions match.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Given this ciphertext + envelope set and the keychain state, determine why decryption fails and propose a fix."
+```
+
+### Step S18 — Registration & Key Setup (Patched)
+
+```md
+Objective:
+- Implement onboarding so:
+  - server never sees vault password,
+  - client derives ARK/AKMK,
+  - account encryption keypair is generated and stored safely.
+
+Prompt/Action:
+- Enforce: vault password never sent to server (used only locally to derive keys).
+- Generate:
+  - ARK, AKMK (per Appendix)
+  - account X25519 keypair
+- Store server-side:
+  - account public key (plaintext OK)
+  - encrypted keychain blob (ciphertext; contains encrypted private key)
+- Auth method:
+  - Use Better Auth for session auth, but vault password remains purely local.
+
+Quality Gate:
+- Packet sniff confirms vault password never transmitted.
+- Public key present server-side; private key never present unencrypted server-side.
+
+Failure Loop:
+- If password appears in network:
+  - Remove any request field carrying it; refactor to local-only derivation.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Find where vault password is being serialized into requests; propose code changes to keep it local-only."
+```
+
+### Step S19 — Secure Upload Modal (Patched)
+
+```md
+Objective:
+- Implement secure upload with required Placement and correct DB mapping (zone fields + sort key), encrypted metadata, and ciphertext-only storage.
+
+Prompt/Action:
+- Enforce required fields per Appendix:
+  - Placement (Timeline — Origins, Timeline — Legacy, or Vault Only)
+- DB mapping:
+  - zone_anchor mapping:
+    - Placement = Timeline (Origins) → zone_anchor = origins
+    - Placement = Timeline (Legacy) → zone_anchor = legacy
+    - Placement = Vault Only → zone_anchor = vault_only
+  - zone_focus_profile_id = current focus profile id
+  - timeline_sort_key = fractional indexing token (not a date string)
+- Encrypted metadata blob contains:
+  - title, description, event date, approximate flag, source
+- object_key must be random/UUID (no filename or meaning).
+
+Quality Gate:
+- New memory row has correct zone fields and a non-date-like sort key.
+- Packet sniff confirms no plaintext meaning transmitted.
+
+Failure Loop:
+- If placement mapping breaks:
+  - Fix the mapping layer and add an integration test for each placement option.
+  - Pivot tool: Cursor
+  - Prompt: "Patch placement→zone mapping and add tests verifying zone_anchor + zone_focus_profile_id + timeline_sort_key."
+```
+
+### Step S21 — Search & Blind Indexing (Patched)
+
+```md
+Objective:
+- Provide privacy-preserving search using blind indexing, with K_search derived from AKMK via Keychain.
+
+Prompt/Action:
+- Derive K_search via Keychain (HKDF from AKMK); do not persist plaintext K_search.
+- Tokenize and HMAC terms locally; send only tokens.
+- Server stores only tokens and matches tokens only.
+
+Quality Gate:
+- No plaintext search terms appear in network payloads or logs.
+- Search works on seeded data.
+
+Failure Loop:
+- If plaintext terms leak:
+  - Move tokenization entirely client-side; confirm payload schemas.
+  - Pivot tool: GPT-5.2 Pro
+  - Prompt: "Rewrite search requests so only blind-index tokens are transmitted; update server accordingly."
+```
+
+### Step S24 — Ops Metadata Addendum (Patched)
+
+```md
+Objective:
+- Implement ops metadata tables and middleware exactly per addendum, with enforced constraints and no meaning leakage.
+
+Prompt/Action:
+- Implement opsMiddleware:
+  - endpoint_key route template
+  - request_id
+  - ip_hmac, user_agent_hmac
+- endpoint_key MUST be the route template (e.g., `/profiles/:id/blob`), never the raw request path.
+- Enforce:
+  - XOR constraint in ops_network_rules
+  - retention jobs for ops tables
+- Add tests that fail if forbidden fields are stored.
+
+Quality Gate:
+- Migrations apply; constraints verified by tests.
+- Ops tables contain only hashed IP/UA and route templates.
+
+Failure Loop:
+- If raw IP/UA/full URLs show up:
+  - Remove from writes, replace with HMAC form.
+  - Pivot tool: Cursor
+  - Prompt: "Patch opsMiddleware to store only HMACs + endpoint_key; add tests that prevent regressions."
+```
+
+---
+
+## D) Drift Vector Checklist
+
+* [ ] **Native scroll accidentally introduced (overflow auto/scroll)** → prevented by **BPv1.1-P11 + BPv1.1-P12**
+* [ ] **Viewport jitter returns via `100vh`/keyboard bounce** → prevented by **BPv1.1-P11**
+* [ ] **Lens toggle implemented as crossfade / wrong order** → prevented by **BPv1.1-P01**
+* [ ] **timeline_sort_key incorrectly set to ISO date/time (metadata leak + ordering bugs)** → prevented by **BPv1.1-P02 + BPv1.1-P01**
+* [ ] **UI bypasses VaultRepo and couples directly to API/DB** → prevented by **BPv1.1-P03**
+* [ ] **Server-side decryption creeps in “for convenience”** → prevented by **BPv1.1-P06 + BPv1.1-P13**
+* [ ] **Crypto runs on main thread causing drag/frame jank** → prevented by **BPv1.1-P07** (and enforced by perf gate in patched S17)
+* [ ] **Logs leak meaning, raw IP, emails, or URLs with IDs** → prevented by **BPv1.1-P09 + BPv1.1-P10 + BPv1.1-P13**
+* [ ] **Connector layer starts drawing extra lines or geometry changes subtly** → prevented by **BPv1.1-P15**
+* [ ] **Debug harness/devtools ship to prod or proliferate ad-hoc** → prevented by **BPv1.1-P14**
+
+---
+
+## E) Unresolved Open Questions
+
+1. **NOT SPECIFIED IN DOCS:** “Current Consolidated Fix List (my patch list draft)” was not present as a standalone file among the provided uploads.
+
+   * **Recommendation:** Treat BPv1.1 patches above as the consolidated v1.1 list; if your fix list exists elsewhere, merge it by mapping each item to a patch ID and adding any missing ones.
+   * **Decision owner:** You (Project Sovereign)
+
+2. **NOT SPECIFIED IN DOCS:** Exact storage location/schema for **account public keys** + **encrypted keychain blob** (server-side).
+
+   * **Recommendation:** Add `account_keys` (account_id pk, public_key, encrypted_keychain_blob, keychain_version, created_at/updated_at) as a new table and classify in ledger (public_key plaintext, keychain blob ciphertext).
+   * **Decision owner:** Architect + Security
+
+3. **NOT SPECIFIED IN DOCS:** Exact UX semantics for **Spouse/Partner** in Add Relative Modal beyond “required for Sequence B spouse restoration.”
+
+   * **Recommendation (default):** Define spouse/partner as “co-parent of an existing child” (stored as a second parent-child edge) and render spouse during Sequence B as “other parent of the selected child; else ghost spouse placeholder.”
+   * **Decision owner:** Product + Architect
+
+4. **NOT SPECIFIED IN DOCS:** Exact data location for **Relationship Label** (encrypted in profile blob vs separate relationship metadata blob).
+
+   * **Recommendation (default):** Store label encrypted in the **child’s** profile blob keyed by `parent_id` (minimizes schema changes).
+   * **Decision owner:** Architect
+
+5. **NOT SPECIFIED IN DOCS:** Long-term multi-family membership model (beyond MVP single-family-per-account).
+
+   * **Recommendation:** Keep MVP as single-family-per-account (profile_claim → family_id). Add a later “Membership v2” RFC before enabling multiple families.
+   * **Decision owner:** Architect + Product

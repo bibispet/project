@@ -1,0 +1,229 @@
+CANONICAL RULES TEXT — COUNCIL CONSTITUTION v1.1
+STATUS: BINDING FOR COUNCIL GOVERNANCE
+SCOPE: ONLY the content below this header is canonical.
+NON-CANONICAL: Patch plans, templates, votes, rationale, open questions, provenance notes.
+CONFLICT RULE: If any other non-binding or lower-ranked governance text conflicts with this, this wins (binding constraints still outrank; see §1.2).
+CHANGE RULE: Canonical text changes only via Baseline + Ratification (or OS-APPEAL).
+# COUNCIL CONSTITUTION v1.1
+VERSION: v1.1
+LAST UPDATED: 2025-12-27
+CANONICAL RULES: Use “COUNCIL CONSTITUTION v1.1” as source-of-truth; if this template conflicts, the Constitution wins.
+## 1. CONSTITUTION
+### 1.1 Scope
+- This constitution defines **Council governance process** (how we decide), not product code/spec.
+- It applies to all Council lanes (Engineering, Security, Ops, Product, Legal, Mixed).
+- Seats are **web-chat instances**. Execution tools (IDEs, agents, code generators) are **not** Council seats unless explicitly declared in the Run Config for a specific step.
+### 1.2 Source-of-truth hierarchy
+1) **Binding constraints (highest authority):**
+   - `master blueprint.txt` (includes `docs/project_rules.md` and any declared binding overrides)
+   - `Technical Appendix v9.1.txt` (Production-Binding; sections marked **LOCKED**)
+2) **Process references (non-binding unless explicitly labeled inside the referenced doc):**
+   - `FINAL EXECUTION ORDER.md` is binding **only** for passages explicitly labeled **“Standing Order”** or **“Active Rule”** within that document; otherwise it is reference material.
+3) This constitution is **subordinate** to binding constraints. If any conflict is detected, the Council must **REJECT** and escalate (see §2.7).
+### 1.3 Non‑negotiable invariants the Council must enforce (binding)
+The Council MUST reject or halt any proposal that violates these binding invariants:
+- **LOCKED change control**
+  - Technical Appendix v9.1 — **PRODUCTION BINDING** — “Change Control: Any section marked **LOCKED** requires **Architect + Product approval** to modify.”
+  - master blueprint / `docs/project_rules.md` — **0) Change Control** — “Any Appendix section marked **LOCKED** may NOT be modified … without Architect + Product approval.”
+  - master blueprint / `docs/project_rules.md` — **0) Change Control** — “If unsure whether something is LOCKED, treat it as LOCKED until confirmed.”
+- **Zero‑Knowledge by construction**
+  - Technical Appendix v9.1 — **0.1 Immutable Business Requirements (LOCKED)** — “user content is encrypted **before leaving the device**; servers store **ciphertext only**.”
+- **Thick client, dumb server (no server decryption)**
+  - Technical Appendix v9.1 — **1.1 Core Principle (LOCKED)** — “Hard prohibition: Server **MUST NOT** contain decryption routines for user vault content.”
+  - master blueprint / `docs/project_rules.md` — **1) Absolute Non‑Negotiables (LOCKED)** — “Server must never decrypt user vault content.”
+- **Ledger Gate (Security Veto)**
+  - master blueprint / `docs/project_rules.md` — **3) Ledger Gate (Security Veto)** — “You MUST classify against Appendix §2.1–§2.3.”
+  - Technical Appendix v9.1 — **2.1 Ciphertext (LOCKED)** — “must be encrypted on client … must not exist as plaintext on the server.”
+  - Technical Appendix v9.1 — **2.2 Plaintext (LOCKED)** — “If the server can avoid knowing it, it must be ciphertext.”
+- **Self‑hosting**
+  - Technical Appendix v9.1 — **10.1 No Cloud‑Only Dependency (LOCKED)** — “System must run fully self-hosted.”
+- **Stop‑the‑line failure protocol**
+  - master blueprint — **Failure Loop Protocol (CRITICAL)** — “If ledger gate fails once: **STOP THE LINE** until fixed.”
+  - master blueprint — **Failure Loop Protocol (CRITICAL)** — “If physics gate fails twice, revert and escalate.”
+### 1.4 Council roles
+- **Seat:** independent reviewer/voter; must not coordinate with other seats; must prefer minimal diffs; must cite binding rules when asserting violations.
+- **Chair:** synthesizes votes; selects **one** final ruling/patch; enforces citation discipline; records the decision.
+- **Ratifier:** independent verification gate after Chair synthesis; bug-hunts; may dissent with the minimal required fix.
+### 1.5 Authority boundaries
+- The Council may decide **implementation choices and process** within binding constraints.
+- The Council may **not** change the intent/requirements of any **LOCKED** rule without the required owner approvals (Architect + Product; and others as applicable).
+- If a binding doc says **“NOT SPECIFIED IN DOCS”** and/or names a **decision owner**, the Council must treat it as an **external decision** and cannot finalize it internally.
+### 1.6 Evidence posture (procedural)
+- **Evidence > narrative.** If it is not in the Decision Packet (or a cited binding source), it is not admissible for a binding ruling.
+- **No scope expansion.** Missing information → REJECT and require packet completion.
+- **Minimal diffs default.** Bounded rewrites are allowed only when the old structure is obsolete; must include explicit migration notes.
+- **Template version lock:** Step Initialization must declare the template version used; all phases must use that version.
+---
+## 2. DECISION PROTOCOLS
+### 2.1 Baseline protocol (default, binding): Decision Packet + Governed Vote + Ratification
+This is the default protocol for any binding decision.
+**Step 0 — Intake (Step Initialization)**
+- Determine lane, phasing (Single vs Two‑Phase), and required artifacts.
+**Step 1 — Packet Builder (required for Two‑Phase)**
+- Produce a Decision Packet that satisfies §2.3.
+**Step 2 — Governed Vote (Seats)**
+- Seats vote independently and provide minimal patches if needed.
+**Step 3 — Chair Synthesis (binding ruling)**
+- Chair selects one outcome/patch and explains why.
+**Step 4 — Ratification (binding gate)**
+- Ratifier verifies Chair correctness and compliance; may RATIFY or DISSENT with minimal required fix.
+### 2.2 When to choose Single‑phase vs Two‑Phase
+**Two‑Phase is REQUIRED** when any of the following apply:
+- Any **LOCKED** rule is in scope or could be impacted.
+- Any **Ledger surface** is touched (DB/API/auth/session/logs/analytics/client persistence/cache).
+- Any crypto/key handling or networked flow that could trigger packet-sniff requirements is in scope.
+- Mixed lane work (cross-lane).
+- Any binding doc marks the matter as “NOT SPECIFIED IN DOCS” or assigns a decision owner.
+**Single‑phase is allowed** only when ALL are true:
+- No LOCKED intent touched.
+- No Ledger surface touched.
+- Low blast radius (docs/tests/UI polish only).
+- No unresolved spec gaps.
+### 2.3 Decision Packet Contract (minimum packet spec)
+Every Decision Packet MUST include:
+A) **Metadata**
+- Step ID + Step Name
+- Lane + phasing + seat count
+- Explicit scope: in/out
+B) **Binding References**
+- Every binding rule relied on, each with:
+  - doc + section heading + quote (≤25 words)
+  - where it applies in the change
+C) **Candidate change**
+- Patch in unified diff OR full-file replacement with file path headers
+- Rationale + alternatives (if any)
+D) **Ledger Gate section (required if any Ledger surface changes)**
+- New/changed fields list
+- Classification vs Appendix §2.1–§2.3
+- Justification for any plaintext (must be operational-only)
+E) **Gates + Evidence Plan**
+- Automated checks to run (repo CI gates if present)
+- Tests to add/update
+- Packet-sniff plan when relevant
+F) **Risk & Rollback**
+- 1–3 realistic failure modes
+- Rollback plan
+- Stop-the-line triggers
+G) **External approvals (if required)**
+- Who must decide (e.g., Architect/Product/Security)
+- Exact questions to ask them
+### 2.4 Citation enforcement + UNPROVEN handling (procedural)
+- Any claim that a proposal violates **LOCKED / Ledger / Zero‑Knowledge** must include a binding citation (doc + section + ≤25-word quote) or be labeled **UNPROVEN**.
+- Any **UNPROVEN** claim alleging a LOCKED/Ledger/Security violation is a **STOP CONDITION** for binding approval.
+### 2.5 Alternate protocol: Blind Vote (Snippet Triage)
+Use only when a full Decision Packet is not yet available and the goal is to quickly detect violations.
+**Rules:**
+- Blind Vote is **NON‑BINDING** by default.
+- Blind Vote becomes **binding only if** an independent Ratifier step is run using the Blind Vote Ratification template.
+- If the snippet touches (or might touch) any Ledger surface or any LOCKED interpretation, the step MUST escalate to the Baseline protocol before merge.
+### 2.6 Alternate protocol: Ops Workflow Vote (workflow triage)
+Use for workflow/tooling choices that do not directly approve code/spec changes.
+**Rules:**
+- Outputs are **NON‑BINDING** for code/spec decisions.
+- If the outcome would change code/spec/LOCKED interpretation, escalate to Baseline.
+### 2.7 Chair identity, tie rules, deadlock, and escalation (OS‑CAL / OS‑APPEAL)
+**Chair identity**
+- The Chair may be a human or a model.
+- If a model is used, the run must name it in the Run Config (not in this constitution).
+**Tie / deadlock (3-seat or 5-seat)**
+- If there is no clear majority, default outcome is **REJECT pending required changes** (do not approve on ambiguity).
+- The Chair may not approve if any cited (or UNPROVEN) LOCKED/Ledger/Security issue remains.
+**OS‑CAL (Call additional seats)**
+Trigger OS‑CAL (expand 3 → 5 seats) when any occur:
+- Any Ledger surface is in scope.
+- Any LOCKED rule is being interpreted or could be impacted.
+- Any seat raises an UNPROVEN LOCKED/Ledger/Security concern.
+- The step is Mixed lane.
+**OS‑APPEAL (Owner escalation)**
+Trigger OS‑APPEAL when:
+- A binding doc says “NOT SPECIFIED IN DOCS” or names a decision owner, OR
+- A change would modify LOCKED intent (requires approvals), OR
+- A Security veto is implicated and cannot be resolved within Baseline.
+The Chair must produce an Escalation Packet and mark the step **REJECT pending owner decision**.
+### 2.8 Decision finality and appeals (no retro-voiding)
+- A decision becomes **binding for implementation/merge** only after **Ratification** in the Baseline protocol, or after **Blind Vote Ratification** when explicitly marked **BINDING (Ratified)**.
+- A **ratified** decision remains in force and must not be retroactively voided by later discussion, drafts, or non-binding triage outputs.
+- A ratified decision may be changed only by:
+  1) A subsequent **Baseline** decision that explicitly references the prior decision and states it is superseding it, or
+  2) An **OS-APPEAL** owner ruling that explicitly overturns it.
+- Any revisit of a ratified decision must use Baseline (Decision Packet + Governed Vote + Ratification) and include the prior decision as a reference in the packet.
+---
+## 3. LANE ARCHITECTURE
+### 3.1 Lanes
+**ENGINEERING**
+- Domain: code changes (web/app/api/db), performance, UI physics, tests.
+- Default: Baseline protocol; may use Blind Vote only for snippet triage.
+**SECURITY**
+- Domain: Ledger classification, crypto/key handling, auth/session, logs, metadata minimization.
+- Authority: veto lane for Ledger/Zero‑Knowledge violations (cannot be overridden).
+**OPS**
+- Domain: self-host deployment, backups, network controls, observability, ops metadata discipline.
+- Default: Baseline for binding decisions; Workflow Vote allowed for non-binding triage.
+**PRODUCT**
+- Domain: UX flows, acceptance criteria, scope control, non-goals adherence.
+- Default: Baseline.
+**LEGAL**
+- Domain: privacy policy, ToS, custody/transfer legal requirements, compliance.
+- Default: Baseline.
+- Note: If no binding legal appendix exists, Legal lane is advisory; binding legal rules must come from binding specs.
+**MIXED**
+- Cross-lane work (auth + crypto + UI + ops).
+- Default: Two‑Phase Baseline, 5 seats minimum (OS‑CAL).
+### 3.2 Routing rules (procedural)
+- Any Ledger surface change → include Security lane review and Ledger Gate section in packet.
+- Any potential LOCKED intent change → REJECT pending approvals (use Reject Pending Approval template).
+- Any “NOT SPECIFIED IN DOCS” → REJECT pending owner decision (use Escalation Packet template).
+---
+## 4. SEAT COUNT POLICY
+### 4.1 Default seat count
+- **Standard:** 3 seats + Chair + Ratifier
+- **High‑risk:** 5 seats + Chair + Ratifier
+- **Low‑risk:** 1 seat + Chair (Ratifier recommended for merges)
+### 4.2 Escalate to 5 seats (proportional rule)
+Escalate to 5 seats when any apply:
+- Touches or interprets LOCKED rules **and** requires interpretation beyond direct quotation.
+- Introduces/changes Ledger surface **and** adds new plaintext fields or new network flows.
+- Any crypto/key-handling changes requiring packet-sniff evidence.
+- Mixed lane scope.
+- Two or more seats raise credible UNPROVEN Ledger/Security claims.
+### 4.3 Independence requirements
+- Seats must be independent (no shared drafts before Chair synthesis).
+- Prefer different vendors/providers for seats when possible.
+- Ratifier should be independent from Chair whenever possible.
+---
+## 5. ROSTER POLICY (MODEL‑AGNOSTIC)
+### 5.1 Role-based roster requirements (non-binding reference)
+**This constitution must not hard-code specific model names as permanent seats.** Roster choices are run-time configuration.
+Role guidance:
+- Seat 1: Spec fidelity + governance + citation discipline
+- Seat 2: Implementation realism + code review
+- Seat 3: Adversarial security/perf thinking
+- Seat 4 (high-risk): Ledger deep-audit
+- Seat 5 (high-risk): Product/UX constraint check
+- Chair: synthesis + patch minimization
+- Ratifier: independent bug-hunting + compliance verification
+### 5.2 Run-time roster recording (binding-for-the-run)
+- Every step MUST include a Run Config that records:
+  - seat count, roster, and template version(s) used.
+### 5.3 Vendor unavailability protocol (procedural)
+- If the preferred provider for a role is unavailable:
+  - Chair may substitute with the closest capability match and must document the reason in the packet.
+  - Increase scrutiny: require Ratifier to explicitly re-check the affected risk area.
+---
+## 6. TEMPLATE PATCHES
+- Template Library changes should be applied as **minimal diffs** by default.
+- Any new protocol introduced by this constitution must have Seat/Chair/Ratifier templates (or explicitly state “not needed” with justification).
+---
+## 7. UPGRADES (ASSURANCE, NOT MODEL-SPECIFIC)
+### 7.1 Baseline
+- 3-seat Baseline protocol with Ratification.
+### 7.2 Upgraded (higher assurance)
+- 5-seat Baseline protocol with:
+  - dedicated Ledger deep-audit seat
+  - strengthened evidence requirements (packet-sniff, log audit, etc.)
+  - ratification is mandatory
+### 7.3 Upgrade triggers
+Upgrade to 5 seats when:
+- Ledger/LOCKED/crypto/network surfaces are in scope
+- Mixed lane scope
+- Any UNPROVEN Ledger/Security claim is raised
