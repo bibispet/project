@@ -107,9 +107,24 @@ Schema tests require a running Postgres instance and `DATABASE_URL`. CI applies 
 
 These repo assets are reusable across Project LORE and other projects, systems, or future repos.
 
-### Concepts and architecture
+### Concept assets
 
-- **Thick-client / dumb-server architecture**: the server stores ciphertext and operational metadata only; user-facing meaning is decrypted client-side.
+These are product/architecture ideas worth preserving separately from the current implementation status.
+
+- **Permission rings / trust boundaries**: model authority around a family vault as rings of trust, for example owner/creator, guardians or custodians, active family members, invited contributors, recovery trustees, and external viewers. This still needs a dedicated spec before implementation; it should define view, write, invite, revoke, export, recovery, and custody-transfer powers per ring while respecting the thick-client/dumb-server and ledger rules.
+- **Family vault sovereignty**: the vault is treated as family-owned memory infrastructure, not as app-owned content. This drives encryption, custody, export, recovery, and self-hosting decisions.
+- **Thick-client / dumb-server boundary**: server stores ciphertext and operational metadata only; user-facing meaning is decrypted client-side.
+- **Custody and succession model**: custody transfer, eligibility gates, and rotation flows are first-class concepts, not account-management afterthoughts.
+- **Ledger / meaning boundary**: every DB column, API field, cache, log, and analytics event must be classified so human meaning does not silently leak into plaintext infrastructure.
+- **Tactile rail mental model**: navigation should feel like a physical family-memory instrument, not a scroll page or infinite graph canvas.
+- **FSM travel model**: timeline movement is expressed through named, deterministic states such as REST, IGNITION, CONVEYOR, ARRIVAL, MERGE, CLEARANCE, MORPH, and CONSTRUCTION.
+- **Relationship visual grammar**: Focus, Generation Label, and Parent nodes own the connector language; other surfaces should not accumulate incidental graph lines.
+- **Bezier Y relationship geometry**: curved, anchored relationship geometry is a reusable visual-system concept for family/lineage surfaces.
+- **Kiosk capture mode**: quick memory capture should stay low-friction while preserving encrypt-before-upload and local-only vault-secret constraints.
+- **Self-hostable family infrastructure**: deployment should remain portable and understandable enough to run outside a single vendor cloud.
+
+### Architecture and implementation seams
+
 - **VaultRepo seam**: `apps/web/src/repos/VaultRepo.ts`, `FixtureVaultRepo.ts`, `ApiVaultRepo.ts`, and `createVaultRepo.ts` define the fixture-to-API boundary so UI code does not couple directly to backend shape.
 - **Ledger classification model**: `docs/ledger_field_matrix.md` plus `scripts/ledger-check.mjs` provide a repeatable way to classify DB/API fields as plaintext-allowed or ciphertext-required.
 - **Stop-the-line quality gates**: `TODO.md` and `docs/LORE_PROJECT_RUNBOOK.md` define when feature work must halt for ledger, tactile, or schema failures.
